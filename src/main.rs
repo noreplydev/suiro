@@ -1,12 +1,12 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 
-#[actix_web::main]
 async fn main() {
     println!("main thread");
     http_server().await;
     println!("http_socket:");
 }
 
+#[actix_web::run]
 async fn http_server() -> std::io::Result<()> {
     println!("Web server running at localhost:3000");
 
