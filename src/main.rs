@@ -1,3 +1,5 @@
+use core::panic;
+
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use tokio;
 
@@ -7,9 +9,7 @@ struct Port {
 
 impl Port {
     fn new(port: u16) -> Self {
-        if port > 65535 {
-            panic!("Port number must be between 0 and 65535");
-        } else if port < 1024 {
+        if port < 1024 {
             panic!("Port number must be greater than 1024");
         }
 
@@ -30,8 +30,8 @@ async fn main() -> std::io::Result<()> {
 
 async fn http_server(port: Port) -> std::io::Result<()> {
     // a thread pool is created here
-    HttpServer::new(|| {
-        println!("server threar");
+    HttpServer::new(move || {
+        println!("[HTTP] SERVER STARTED ON PORT: {}", &port.num);
         App::new()
             .route("/", web::get().to(|| HttpResponse::Ok()))
             .route("/hi", web::get().to(|| async { "Hello world!" }))
