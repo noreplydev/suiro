@@ -1,15 +1,34 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use tokio;
 
-async fn main() {
-    println!("main thread");
-    http_server().await;
-    println!("http_socket:");
+struct Port {
+    num: u16,
 }
 
-#[actix_web::run]
-async fn http_server() -> std::io::Result<()> {
-    println!("Web server running at localhost:3000");
+impl Port {
+    fn new(port: u16) -> Self {
+        if port > 65535 {
+            panic!("Port number must be between 0 and 65535");
+        } else if port < 1024 {
+            panic!("Port number must be greater than 1024");
+        }
 
+        Port { num: port }
+    }
+}
+
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    println!("[SUIRO] Starting service");
+
+    let http_port = Port::new(8080);
+
+    let http = http_server(http_port).await; // spawn the http server in a new thread
+
+    Ok(())
+}
+
+async fn http_server(port: Port) -> std::io::Result<()> {
     // a thread pool is created here
     HttpServer::new(|| {
         println!("server threar");
@@ -17,8 +36,8 @@ async fn http_server() -> std::io::Result<()> {
             .route("/", web::get().to(|| HttpResponse::Ok()))
             .route("/hi", web::get().to(|| async { "Hello world!" }))
     })
-    .bind(("127.0.0.1", 3000))?
-    .workers(1)
+    .bind(("127.0.0.1", port.num))?
+    .workers(1) // only one thread for the http server
     .run()
     .await
 }
