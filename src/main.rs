@@ -1,12 +1,8 @@
-use actix_web::dev::Server;
-use core::panic;
-use std::thread;
-use tokio::net::TcpListener;
-use tokio::net::TcpStream;
-
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
-use tokio;
+use std::net::{TcpListener, TcpStream};
+use std::thread;
 
+#[derive(Copy, Clone)]
 struct Port {
     num: u16,
 }
@@ -21,16 +17,15 @@ impl Port {
     }
 }
 
-#[tokio::main]
-async fn main() -> std::io::Result<()> {
+fn main() {
     println!("[SUIRO] Starting service");
 
-    let http_port = Port::new(3030);
+    let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
     // Start the HTTP server
     // a thread pool is created here
-    let _ = HttpServer::new(move || {
+    /*     let http = HttpServer::new(|| {
         println!("[HTTP] SERVER STARTED ON PORT: 3000");
         App::new()
             .route("/", web::get().to(|| HttpResponse::Ok()))
@@ -40,27 +35,39 @@ async fn main() -> std::io::Result<()> {
     .unwrap()
     .workers(1) // only one thread for the http server
     .run()
-    .await;
+    .await; */
 
     // Start the TCP server in a new thread
-    thread::spawn(|| {
-        println!("[TCP] Starting TCP server");
+    let tcp = thread::spawn(move || {
+        let tcp_server = tcp_server(tcp_port);
     });
 
-    Ok(())
+    let http = thread::spawn(move || {
+        let http_server = tcp_server(http_port);
+    });
+
+    tcp.join().unwrap();
+    http.join().unwrap();
+
+    println!("[SUIRO] Stopping service");
 }
 
-async fn tcp_server(port: Port) -> Result<tokio::net::TcpListener, std::io::Error> {
-    println!("[TCP] SERVER STARTED ON PORT: {}", &port.num);
-    let tcp = TcpListener::bind(("127.0.0.1", port.num)).await?;
+fn tcp_server(port: Port) -> Result<std::net::TcpListener, std::io::Error> {
+    let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
+    let requests = listener.incoming();
 
-    loop {
-        let (stream, _) = tcp.accept().await?;
-        tokio::spawn(handle_connection(stream));
+    println!("[TCP] listening on {}", &port.num);
+    println!("[TCP] waiting for connections");
+
+    for stream in requests {
+        let stream = stream.unwrap();
+
+        handle_connection(stream);
     }
+
+    Ok(listener)
 }
 
-async fn handle_connection(_stream: TcpStream) {
-    println!("New TCP connection");
-    // Handle TCP connection here
+fn handle_connection(stream: TcpStream) {
+    println!("[TCP] New connection: {}", stream.peer_addr().unwrap());
 }
