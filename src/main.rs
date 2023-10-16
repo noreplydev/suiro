@@ -28,7 +28,7 @@ fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
-    let http_handle = thread::spawn(move || {
+    let http = thread::spawn(move || {
         let runtime = actix_rt::System::new();
         runtime.block_on(async move {
             let _ = http_server(http_port).await;
@@ -40,17 +40,9 @@ fn main() {
         let _ = tcp_server(tcp_port);
     });
 
-    // keybind to stop the server
-    loop {
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
-        let input = input.trim().to_string();
-
-        if input == "q" {
-            println!("[SUIRO] Stopping service");
-            break;
-        }
-    }
+    // Wait for the threads to finish
+    http.join().unwrap();
+    tcp.join().unwrap();
 }
 
 fn tcp_server(port: Port) -> Result<std::net::TcpListener, std::io::Error> {
