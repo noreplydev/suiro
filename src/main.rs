@@ -17,26 +17,35 @@ impl Port {
     }
 }
 
-#[actix_web::main]
-async fn main() {
+fn main() {
     println!("[SUIRO] Starting service");
 
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
-    // Start the TCP server in a new thread
-    let tcp = thread::spawn(move || {
-        let tcp_server = tcp_server(tcp_port);
+    let http_handle = thread::spawn(move || {
+        let runtime = actix_rt::System::new();
+        runtime.block_on(async move {
+            let _ = http_server(http_port).await;
+        });
     });
 
-    // Start the HTTP server in a new thread
-    http_server(http_port)
-        .await
-        .expect("Error starting HTTP server");
+    // Start the TCP server in a new thread
+    let tcp = thread::spawn(move || {
+        let _ = tcp_server(tcp_port);
+    });
 
-    tcp.join().unwrap();
+    // keybind to stop the server
+    loop {
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).unwrap();
+        let input = input.trim().to_string();
 
-    println!("[SUIRO] Stopping service");
+        if input == "q" {
+            println!("[SUIRO] Stopping service");
+            break;
+        }
+    }
 }
 
 fn tcp_server(port: Port) -> Result<std::net::TcpListener, std::io::Error> {
@@ -62,7 +71,7 @@ fn handle_connection(stream: TcpStream) {
 async fn http_server(port: Port) -> Result<(), std::io::Error> {
     // a thread pool is created here
     HttpServer::new(|| {
-        println!("[HTTP] SERVER STARTED ON PORT: 3000");
+        println!("[HTTP] Server started on port 3000");
         App::new()
             .route("/", web::get().to(|| HttpResponse::Ok()))
             .route(
