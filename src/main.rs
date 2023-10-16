@@ -19,6 +19,11 @@ impl Port {
 
 fn main() {
     println!("[SUIRO] Starting service");
+    ctrlc::set_handler(move || {
+        println!("[SUIRO] Stopping service");
+        std::process::exit(0);
+    })
+    .expect("Error setting Ctrl-C handler");
 
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);

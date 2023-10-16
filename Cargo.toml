@@ -9,3 +9,4 @@ edition = "2021"
 tokio = { version = "1", features = ["full"] }
 actix-web = "4"
 actix-rt = "2"
+ctrlc = "3"
