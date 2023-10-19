@@ -69,15 +69,13 @@ async fn http_server(port: Port) -> Result<(), std::io::Error> {
     // a thread pool is created here
     HttpServer::new(|| {
         println!("[HTTP] Server started on port 3000");
-        App::new()
-            .route("/", web::get().to(|| HttpResponse::Ok()))
-            .route(
-                "/hi",
-                web::get().to(|| async {
-                    println!("[HTTP] GET /hi");
-                    HttpResponse::Ok()
-                }),
-            )
+        App::new().route(
+            "/",
+            web::get().to(|| async {
+                println!("[HTTP] GET /");
+                HttpResponse::Ok()
+            }),
+        )
     })
     .bind(("127.0.0.1", port.num))
     .unwrap()

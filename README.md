@@ -4,3 +4,6 @@ suiro-rs is the [suiro](https://github.com/noreplydev/suiro) port to rust. Basic
 
 ## differences
 - Since rust supports multi-threading, suiro-rs is multi-threaded using each thread to manage each server.
+
+
+made with ❤️ by @noreplydev
