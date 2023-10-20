@@ -1,6 +1,8 @@
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
+use unique_id::string::StringGenerator;
+use unique_id::Generator;
 
 #[derive(Copy, Clone)]
 struct Port {
@@ -62,7 +64,8 @@ fn tcp_server(port: Port) -> Result<std::net::TcpListener, std::io::Error> {
 }
 
 fn handle_connection(stream: TcpStream) {
-    println!("[TCP] New connection: {}", stream.peer_addr().unwrap());
+    let gen = StringGenerator::default();
+    println!("[TCP] New connection: {}", gen.next_id());
 }
 
 async fn http_server(port: Port) -> Result<(), std::io::Error> {
