@@ -33,25 +33,25 @@ fn main() {
     let http = thread::spawn(move || {
         let runtime = actix_rt::System::new();
         runtime.block_on(async move {
-            let _ = http_server(http_port).await;
+            http_server(http_port).await;
         });
     });
 
     // Start the TCP server in a new thread
     let tcp = thread::spawn(move || {
-        let _ = tcp_server(tcp_port);
+        tcp_server(tcp_port);
     });
 
     // Wait for the threads to finish
-    http.join().unwrap();
-    tcp.join().unwrap();
+    let _ = http.join();
+    let _ = tcp.join();
 }
 
-fn tcp_server(port: Port) -> Result<std::net::TcpListener, std::io::Error> {
+fn tcp_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
     let requests = listener.incoming();
 
-    println!("[TCP] listening on {}", &port.num);
+    println!("[TCP] listening on {}", port.num);
     println!("[TCP] waiting for connections");
 
     for stream in requests {
@@ -59,8 +59,6 @@ fn tcp_server(port: Port) -> Result<std::net::TcpListener, std::io::Error> {
 
         handle_connection(stream);
     }
-
-    Ok(listener)
 }
 
 fn handle_connection(stream: TcpStream) {
@@ -68,7 +66,7 @@ fn handle_connection(stream: TcpStream) {
     println!("[TCP] New connection: {}", gen.next_id());
 }
 
-async fn http_server(port: Port) -> Result<(), std::io::Error> {
+async fn http_server(port: Port) {
     // a thread pool is created here
     HttpServer::new(|| {
         println!("[HTTP] Server started on port 3000");
@@ -81,11 +79,9 @@ async fn http_server(port: Port) -> Result<(), std::io::Error> {
         )
     })
     .bind(("127.0.0.1", port.num))
-    .unwrap()
+    .expect("Error binding to port")
     .workers(1) // only one thread for the http server
     .run()
     .await
     .expect("Error starting HTTP server");
-
-    Ok(())
 }
