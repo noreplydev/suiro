@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use unique_id::string::StringGenerator;
@@ -13,7 +13,6 @@ impl Port {
         if port < 1024 {
             panic!("Port number must be greater than 1024");
         }
-
         Port { num: port }
     }
 }
@@ -64,32 +63,44 @@ fn tcp_connection_handler(stream: TcpStream) {
 
 fn http_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
-    let requests = listener.incoming();
-
     println!("[HTTP] Waiting connections on {}", port.num);
 
-    for stream in requests {
-        let stream = stream.unwrap();
+    for incoming in listener.incoming() {
+        let stream = incoming.unwrap();
 
-        http_connection_handler(stream);
+        handle_connection(stream);
     }
 }
 
-fn http_connection_handler(stream: TcpStream) {
-    let raw = get_raw_request(&stream).unwrap();
-    println!("[HTTP] New connection: {}", raw);
-}
+fn handle_connection(mut stream: TcpStream) {
+    let mut buf_reader = BufReader::new(&mut stream);
+    let mut http_request: Vec<String> = Vec::new();
 
-fn get_raw_request(stream: &TcpStream) -> Result<String, std::io::Error> {
-    let buf_reader = BufReader::new(stream);
+    // Read headers.
+    for line in buf_reader.by_ref().lines() {
+        let line = line.unwrap();
+        if line.is_empty() {
+            break;
+        }
+        http_request.push(line);
+    }
 
-    let http_request: Vec<_> = buf_reader
-        .lines()
-        .map(|result| result.unwrap())
-        .take_while(|line| !line.is_empty())
-        .collect();
+    // Extract Content-Length from headers if present.
+    let mut content_length = 0;
+    for line in &http_request {
+        if line.starts_with("Content-Length:") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() > 1 {
+                content_length = parts[1].parse::<usize>().unwrap_or(0);
+            }
+        }
+    }
 
-    let raw = http_request.join("\r\n");
-
-    Ok(raw)
+    // Read body if Content-Length is present and greater than 0.
+    if content_length > 0 {
+        let mut body = vec![0u8; content_length];
+        buf_reader.read_exact(&mut body).unwrap();
+        // Here you can process the body if needed.
+        println!("Received body: {}", String::from_utf8_lossy(&body));
+    }
 }
