@@ -1,10 +1,9 @@
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use std::io::{BufRead, BufReader};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
 
-#[derive(Copy, Clone)]
 struct Port {
     num: u16,
 }
@@ -30,11 +29,9 @@ fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
+    // Start the TCP server in a new thread
     let http = thread::spawn(move || {
-        let runtime = actix_rt::System::new();
-        runtime.block_on(async move {
-            http_server(http_port).await;
-        });
+        http_server(http_port);
     });
 
     // Start the TCP server in a new thread
@@ -51,37 +48,48 @@ fn tcp_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
     let requests = listener.incoming();
 
-    println!("[TCP] listening on {}", port.num);
-    println!("[TCP] waiting for connections");
+    println!("[TCP] Waiting connections on {}", port.num);
 
     for stream in requests {
         let stream = stream.unwrap();
 
-        handle_connection(stream);
+        tcp_connection_handler(stream);
     }
 }
 
-fn handle_connection(stream: TcpStream) {
+fn tcp_connection_handler(stream: TcpStream) {
     let gen = StringGenerator::default();
     println!("[TCP] New connection: {}", gen.next_id());
 }
 
-async fn http_server(port: Port) {
-    // a thread pool is created here
-    HttpServer::new(|| {
-        println!("[HTTP] Server started on port 3000");
-        App::new().route(
-            "/",
-            web::get().to(|| async {
-                println!("[HTTP] GET /");
-                HttpResponse::Ok()
-            }),
-        )
-    })
-    .bind(("127.0.0.1", port.num))
-    .expect("Error binding to port")
-    .workers(1) // only one thread for the http server
-    .run()
-    .await
-    .expect("Error starting HTTP server");
+fn http_server(port: Port) {
+    let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
+    let requests = listener.incoming();
+
+    println!("[HTTP] Waiting connections on {}", port.num);
+
+    for stream in requests {
+        let stream = stream.unwrap();
+
+        http_connection_handler(stream);
+    }
+}
+
+fn http_connection_handler(stream: TcpStream) {
+    let raw = get_raw_request(&stream).unwrap();
+    println!("[HTTP] New connection: {}", raw);
+}
+
+fn get_raw_request(stream: &TcpStream) -> Result<String, std::io::Error> {
+    let buf_reader = BufReader::new(stream);
+
+    let http_request: Vec<_> = buf_reader
+        .lines()
+        .map(|result| result.unwrap())
+        .take_while(|line| !line.is_empty())
+        .collect();
+
+    let raw = http_request.join("\r\n");
+
+    Ok(raw)
 }
