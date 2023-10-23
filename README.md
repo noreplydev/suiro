@@ -20,4 +20,7 @@ Rust is very fast and reliable language. This caracteristics makes it perfect fo
 cargo install suiro-rs --git 
 ```
 
+## Issues 
+If you find any issue, please report on github issues or email me at noreplycristiansanchez@gmail.com
+
 made with ❤️ by @noreplydev
