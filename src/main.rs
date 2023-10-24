@@ -65,42 +65,70 @@ fn http_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
     println!("[HTTP] Waiting connections on {}", port.num);
 
+    let total_bytes = 0;
+    let readed_bytes = 0;
+    let readed = "";
+
     for incoming in listener.incoming() {
         let stream = incoming.unwrap();
+        let mut buf_reader = BufReader::new(&stream);
+        let lines = buf_reader.by_ref().lines();
 
-        handle_connection(stream);
-    }
-}
+        let mut headers: Vec<String> = Vec::new();
+        let mut body: Vec<String> = Vec::new();
 
-fn handle_connection(mut stream: TcpStream) {
-    let mut buf_reader = BufReader::new(&mut stream);
-    let mut http_request: Vec<String> = Vec::new();
+        // Read headers.
+        for (index, line) in lines.enumerate() {
+            let line = line.unwrap();
+            if line.is_empty() {
+                let (_headers, body_lines): (Vec<_>, Vec<_>) = buf_reader
+                    .by_ref()
+                    .lines()
+                    .enumerate()
+                    .partition(|(i, _)| i > &index);
 
-    // Read headers.
-    for line in buf_reader.by_ref().lines() {
-        let line = line.unwrap();
-        if line.is_empty() {
-            break;
-        }
-        http_request.push(line);
-    }
-
-    // Extract Content-Length from headers if present.
-    let mut content_length = 0;
-    for line in &http_request {
-        if line.starts_with("Content-Length:") {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() > 1 {
-                content_length = parts[1].parse::<usize>().unwrap_or(0);
+                body = body_lines
+                    .into_iter()
+                    .filter_map(|(_, result)| match result {
+                        Ok(string) => Some(string),
+                        Err(_) => {
+                            println!("[HTTP] Error parsing body line");
+                            None
+                        }
+                    })
+                    .collect();
+                break;
             }
+            headers.push(line);
         }
-    }
 
-    // Read body if Content-Length is present and greater than 0.
-    if content_length > 0 {
-        let mut body = vec![0u8; content_length];
-        buf_reader.read_exact(&mut body).unwrap();
-        // Here you can process the body if needed.
-        println!("Received body: {}", String::from_utf8_lossy(&body));
+        println!("[HTTP] Request headers: \n\n\r{}\n", headers.join("\n"));
+        println!("[HTTP] Request body: \n\n\r{}\n", body.join("\n"));
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        /*
+               // Extract Content-Length from headers if present.
+               let mut content_length = 0;
+               for line in &headers {
+                   if line.to_lowercase().starts_with("content-length:") {
+                       let parts: Vec<&str> = line.split_whitespace().collect();
+                       if parts.len() > 1 {
+                           content_length = parts[1].parse::<usize>().unwrap_or(0);
+                       }
+                   }
+               }
+
+               // Read body if Content-Length is present and greater than 0.
+               if content_length > 0 {
+                   println!("[HTTP] Body length: {}", content_length);
+                   let mut body = vec![0u8; content_length];
+
+                   buf_reader.read_exact(&mut body).unwrap();
+
+                   println!("Received body: {}", String::from_utf8_lossy(&body));
+               }
+        */
+        //handle_connection(stream);
     }
 }
+
+fn handle_connection(mut stream: TcpStream) {}
