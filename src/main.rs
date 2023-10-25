@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 use unique_id::string::StringGenerator;
@@ -30,7 +30,11 @@ fn main() {
 
     // Start the TCP server in a new thread
     let http = thread::spawn(move || {
-        http_server(http_port);
+        let runtime =
+            tokio::runtime::Builder::build(&mut tokio::runtime::Builder::new_current_thread());
+
+        let runtime = runtime.unwrap();
+        runtime.block_on(async { http_server(http_port).await });
     });
 
     // Start the TCP server in a new thread
@@ -61,7 +65,7 @@ fn tcp_connection_handler(stream: TcpStream) {
     println!("[TCP] New connection: {}", gen.next_id());
 }
 
-fn http_server(port: Port) {
+async fn http_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
     println!("[HTTP] Waiting connections on {}", port.num);
 
@@ -70,41 +74,14 @@ fn http_server(port: Port) {
     let readed = "";
 
     for incoming in listener.incoming() {
-        let stream = incoming.unwrap();
-        let mut buf_reader = BufReader::new(&stream);
-        let lines = buf_reader.by_ref().lines();
+        println!("Spawning async function");
+        let algo = tokio::spawn(handle_http_connection(incoming));
 
-        let mut headers: Vec<String> = Vec::new();
-        let mut body: Vec<String> = Vec::new();
-
-        // Read headers.
-        for (index, line) in lines.enumerate() {
-            let line = line.unwrap();
-            if line.is_empty() {
-                let (_headers, body_lines): (Vec<_>, Vec<_>) = buf_reader
-                    .by_ref()
-                    .lines()
-                    .enumerate()
-                    .partition(|(i, _)| i > &index);
-
-                body = body_lines
-                    .into_iter()
-                    .filter_map(|(_, result)| match result {
-                        Ok(string) => Some(string),
-                        Err(_) => {
-                            println!("[HTTP] Error parsing body line");
-                            None
-                        }
-                    })
-                    .collect();
-                break;
-            }
-            headers.push(line);
+        if algo.is_finished() {
+            println!("termino {:?}", algo);
         }
 
-        println!("[HTTP] Request headers: \n\n\r{}\n", headers.join("\n"));
-        println!("[HTTP] Request body: \n\n\r{}\n", body.join("\n"));
-        let _ = stream.shutdown(std::net::Shutdown::Both);
+        println!("yo que se");
         /*
                // Extract Content-Length from headers if present.
                let mut content_length = 0;
@@ -131,4 +108,40 @@ fn http_server(port: Port) {
     }
 }
 
-fn handle_connection(mut stream: TcpStream) {}
+async fn handle_http_connection(incoming: Result<TcpStream, Error>) {
+    println!("ultima");
+    let mut stream = incoming.unwrap();
+    let mut buf_reader = BufReader::new(&stream);
+
+    let mut headers: Vec<String> = Vec::new();
+    let mut body: Vec<String> = Vec::new();
+
+    // Read headers.
+    for (index, line) in buf_reader.by_ref().lines().enumerate() {
+        let line = line.unwrap();
+        if line.is_empty() {
+            let (_headers, body_lines): (Vec<_>, Vec<_>) = buf_reader
+                .by_ref()
+                .lines()
+                .enumerate()
+                .partition(|(i, _)| i > &index);
+
+            body = body_lines
+                .into_iter()
+                .filter_map(|(_, result)| match result {
+                    Ok(string) => Some(string),
+                    Err(_) => {
+                        println!("[HTTP] Error parsing body line");
+                        None
+                    }
+                })
+                .collect();
+            break;
+        }
+        headers.push(line);
+    }
+
+    println!("[HTTP] Request headers: \n\n\r{}\n", headers.join("\n"));
+    println!("[HTTP] Request body: \n\n\r{}\n", body.join("\n"));
+    let _ = stream.write_all("HTTP/1.1 200 OK\r\n\r\n".as_bytes());
+}

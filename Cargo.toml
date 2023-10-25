@@ -9,3 +9,5 @@ edition = "2021"
 ctrlc = "3"
 unique_id = "0.1.5"
 serde_json = "1.0.107"
+tokio = { version = "1", features = ["full"] }
+
