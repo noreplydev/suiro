@@ -15,6 +15,12 @@ Rust is very fast and reliable language. This caracteristics makes it perfect fo
 
 - Connections management: In suiro we use alive-sessions package to manage connections and timeouts, but in suiro-rs we use a custom implementation of the sessions.  
 
+## Limitations
+Suiro is still in development but we can predict some limitations that will be present in the first release.
+
+#### · Url resolution
+When a exposed service like a react app refers to a local resource (like an image) with relative routes it could not work. When a resource is requested using relative routes the browser will try to find the resource in the server. To be more clear, if the service endpoint is `https://52.23.234.23/8noiasdb238` and the resource is `/static/image.png` the browser will try to find the resource in `https://52.23.234.23/static/image.png` instead of `https://52.23.234.23/8noiasdb238/static/image.png` so to solve this, the tunneling server uses the referer header to make url resolution but this header is not required by the HTTP protocol so it can be missing in some cases. 
+
 ## install binary
 ```bash
 cargo install suiro-rs --git 
