@@ -1,5 +1,5 @@
 use std::thread;
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
@@ -84,8 +84,29 @@ async fn http_server(port: Port) {
 }
 
 async fn http_connection_handler(stream: TcpStream) {
-    let mut buf_reader = BufReader::new(stream);
     println!("[HTTP] New connection");
+    let mut buf_reader = BufReader::new(stream);
+
+    let mut headers: Vec<String> = Vec::new();
+    let mut body: Vec<String> = Vec::new();
+
+    // Read headers
+    let mut line = String::new();
+    while buf_reader
+        .read_line(&mut line)
+        .await
+        .expect("Error reading line")
+        > 0
+    {
+        let line = line.trim().to_string();
+        if line.is_empty() {
+            break; // End of headers
+        }
+
+        headers.push(line);
+    }
+
+    println!("[HTTP] Request headers: \n\n\r{}\n", headers.join("\n"));
 }
 
 /*     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
