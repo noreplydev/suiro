@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Error, Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::thread;
+use tokio::net::{TcpListener, TcpStream};
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
 
@@ -29,26 +29,43 @@ fn main() {
     let tcp_port = Port::new(3040);
 
     // Start the TCP server in a new thread
-    let http = thread::spawn(move || {
+    /*     let http = thread::spawn(move || {
         let runtime =
             tokio::runtime::Builder::build(&mut tokio::runtime::Builder::new_current_thread());
-
         let runtime = runtime.unwrap();
+
         runtime.block_on(async { http_server(http_port).await });
-    });
+    }); */
 
     // Start the TCP server in a new thread
     let tcp = thread::spawn(move || {
-        tcp_server(tcp_port);
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        runtime.block_on(async { tcp_server(tcp_port).await });
     });
 
     // Wait for the threads to finish
-    let _ = http.join();
+    //let _ = http.join();
     let _ = tcp.join();
 }
 
-fn tcp_server(port: Port) {
-    let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
+async fn tcp_server(port: Port) {
+    let listener = TcpListener::bind(("127.0.0.1", port.num)).await.unwrap();
+    println!("[TCP] Waiting connections on {}", port.num);
+
+    loop {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        // A new task is spawned for each inbound socket. The socket is
+        // moved to the new task and processed there.
+        tokio::spawn(async move {
+            tcp_connection_handler(socket).await;
+        });
+    }
+
+    /*     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
     let requests = listener.incoming();
 
     println!("[TCP] Waiting connections on {}", port.num);
@@ -57,13 +74,14 @@ fn tcp_server(port: Port) {
         let stream = stream.unwrap();
 
         tcp_connection_handler(stream);
-    }
+    } */
 }
 
-fn tcp_connection_handler(stream: TcpStream) {
+async fn tcp_connection_handler(stream: TcpStream) {
     let gen = StringGenerator::default();
     println!("[TCP] New connection: {}", gen.next_id());
 }
+/*
 
 async fn http_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
@@ -107,7 +125,6 @@ async fn http_server(port: Port) {
         //handle_connection(stream);
     }
 }
-
 async fn handle_http_connection(incoming: Result<TcpStream, Error>) {
     println!("ultima");
     let mut stream = incoming.unwrap();
@@ -145,3 +162,4 @@ async fn handle_http_connection(incoming: Result<TcpStream, Error>) {
     println!("[HTTP] Request body: \n\n\r{}\n", body.join("\n"));
     let _ = stream.write_all("HTTP/1.1 200 OK\r\n\r\n".as_bytes());
 }
+ */
