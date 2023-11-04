@@ -57,7 +57,7 @@ async fn tcp_server(port: Port) {
     println!("[TCP] Waiting connections on {}", port.num);
 
     loop {
-        let (mut socket, _) = listener.accept().await.unwrap();
+        let (socket, _) = listener.accept().await.unwrap();
         tokio::spawn(async move {
             // spawn a task for each inbound socket
             tcp_connection_handler(socket).await;
@@ -67,7 +67,11 @@ async fn tcp_server(port: Port) {
 
 async fn tcp_connection_handler(stream: TcpStream) {
     let gen = StringGenerator::default();
-    println!("[TCP] New connection: {}", gen.next_id());
+    println!(
+        "[TCP] New connection {}: {}",
+        stream.peer_addr().unwrap(),
+        gen.next_id()
+    );
 }
 
 async fn http_server(port: Port) {
@@ -75,7 +79,7 @@ async fn http_server(port: Port) {
     println!("[HTTP] Waiting connections on {}", port.num);
 
     loop {
-        let (mut socket, _) = listener.accept().await.unwrap();
+        let (socket, _) = listener.accept().await.unwrap();
         tokio::spawn(async {
             // spawn a task for each inbound socket
             http_connection_handler(socket).await;
@@ -84,7 +88,7 @@ async fn http_server(port: Port) {
 }
 
 async fn http_connection_handler(stream: TcpStream) {
-    println!("[HTTP] New connection");
+    println!("[HTTP] New connection {}", stream.peer_addr().unwrap());
     let mut buf_reader = BufReader::new(stream);
 
     let mut headers: Vec<String> = Vec::new();
