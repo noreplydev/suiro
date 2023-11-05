@@ -1,8 +1,10 @@
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::{Arc, Mutex};
 use std::{thread, vec};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
@@ -48,7 +50,7 @@ fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
-    let mutex: Mutex<Vec<Session>> = Mutex::new(vec![]);
+    let mutex: Mutex<HashMap<String, Session>> = Mutex::new(HashMap::new());
     let sessions = Arc::new(mutex);
 
     let sessions_ref_tcp = Arc::clone(&sessions);
@@ -81,7 +83,7 @@ fn main() {
     println!("{:?}", sessions);
 }
 
-async fn tcp_server(port: Port, sessions_ref: Arc<Mutex<Vec<Session>>>) {
+async fn tcp_server(port: Port, sessions_ref: Arc<Mutex<HashMap<String, Session>>>) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).await.unwrap();
     println!("[TCP] Waiting connections on {}", port.num);
 
@@ -96,7 +98,10 @@ async fn tcp_server(port: Port, sessions_ref: Arc<Mutex<Vec<Session>>>) {
     }
 }
 
-async fn tcp_connection_handler(mut stream: TcpStream, sessions_ref: Arc<Mutex<Vec<Session>>>) {
+async fn tcp_connection_handler(
+    mut stream: TcpStream,
+    sessions_ref: Arc<Mutex<HashMap<String, Session>>>,
+) {
     let gen = StringGenerator::default();
     let session_id = gen.next_id();
     let session_endpoint = gen.next_id();
@@ -107,11 +112,12 @@ async fn tcp_connection_handler(mut stream: TcpStream, sessions_ref: Arc<Mutex<V
         .await
         .unwrap();
 
+    let hashmap_key = session_id.clone();
     let session = Session::new(session_id, session_endpoint, stream);
-    sessions_ref.lock().unwrap().push(session);
+    sessions_ref.lock().unwrap().insert(hashmap_key, session);
 }
 
-async fn http_server(port: Port, sessions_ref: Arc<Mutex<Vec<Session>>>) {
+async fn http_server(port: Port, sessions_ref: Arc<Mutex<HashMap<String, Session>>>) {
     // The address we'll bind to.
     let addr = ([127, 0, 0, 1], port.num).into();
 
@@ -136,7 +142,7 @@ async fn http_server(port: Port, sessions_ref: Arc<Mutex<Vec<Session>>>) {
 
 async fn http_connection_handler(
     _req: hyper::Request<Body>,
-    sessions_ref: Arc<Mutex<Vec<Session>>>,
+    sessions_ref: Arc<Mutex<HashMap<String, Session>>>,
 ) -> Result<Response<Body>, hyper::Error> {
     println!("[HTTP] New connection {:?}", _req.uri());
     println!("wiiii --------- {:?}", sessions_ref.lock().unwrap());
