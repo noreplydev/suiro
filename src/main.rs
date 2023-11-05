@@ -1,3 +1,5 @@
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Response, Server};
 use std::thread;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -14,6 +16,22 @@ impl Port {
             println!("Port number must be greater than 1024 or run as root");
         }
         Port { num: port }
+    }
+}
+
+struct Session {
+    session_id: String,
+    session_endpoint: String,
+    socket: TcpStream,
+}
+
+impl Session {
+    fn new(id: String, endpoint: String, socket: TcpStream) -> Self {
+        Session {
+            session_id: id,
+            session_endpoint: endpoint,
+            socket,
+        }
     }
 }
 
@@ -65,15 +83,49 @@ async fn tcp_server(port: Port) {
     }
 }
 
-async fn tcp_connection_handler(stream: TcpStream) {
+async fn tcp_connection_handler(mut stream: TcpStream) {
     let gen = StringGenerator::default();
-    println!(
-        "[TCP] New connection {}: {}",
-        stream.peer_addr().unwrap(),
-        gen.next_id()
-    );
+    let session_id = gen.next_id();
+    let session_endpoint = gen.next_id();
+
+    println!("[TCP] New connection {}: /{}", session_id, session_endpoint);
+    stream
+        .write(format!("connection\n{}", session_endpoint).as_bytes())
+        .await
+        .unwrap();
+
+    let session = Session::new(session_id, session_endpoint, stream);
 }
 
+async fn http_server(port: Port) {
+    // The address we'll bind to.
+    let addr = ([127, 0, 0, 1], 3000).into();
+
+    // This is our service handler. It receives a Request, processes it, and returns a Response.
+    let make_service = make_service_fn(|_conn| {
+        async {
+            // service_fn converts our function into a `Service`.
+            Ok::<_, hyper::Error>(service_fn(http_connection_handler))
+        }
+    });
+
+    let server = Server::bind(&addr).serve(make_service);
+    println!("[HTTP] Waiting connections on {}", port.num);
+
+    if let Err(e) = server.await {
+        eprintln!("server error: {}", e);
+    }
+}
+
+async fn http_connection_handler(
+    _req: hyper::Request<Body>,
+) -> Result<Response<Body>, hyper::Error> {
+    println!("[HTTP] New connection {:?}", _req.uri());
+    Ok(Response::new(Body::from("Hello, World!")))
+}
+
+////////////////////
+/*
 async fn http_server(port: Port) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).await.unwrap();
     println!("[HTTP] Waiting connections on {}", port.num);
@@ -94,100 +146,6 @@ async fn http_connection_handler(stream: TcpStream) {
     let mut headers: Vec<String> = Vec::new();
     let mut body: Vec<String> = Vec::new();
 
-    // Read headers
-    let mut line = String::new();
-    while buf_reader
-        .read_line(&mut line)
-        .await
-        .expect("Error reading line")
-        > 0
-    {
-        let line = line.trim().to_string();
-        if line.is_empty() {
-            break; // End of headers
-        }
-
-        headers.push(line);
-    }
-
     println!("[HTTP] Request headers: \n\n\r{}\n", headers.join("\n"));
-}
-
-/*     let listener = TcpListener::bind(("127.0.0.1", port.num)).unwrap();
-println!("[HTTP] Waiting connections on {}", port.num);
-
-let total_bytes = 0;
-let readed_bytes = 0;
-let readed = "";
-
-for incoming in listener.incoming() {
-    println!("Spawning async function");
-    let algo = tokio::spawn(handle_http_connection(incoming));
-
-    if algo.is_finished() {
-        println!("termino {:?}", algo);
-    }
-
-    println!("yo que se"); */
-/*
-               // Extract Content-Length from headers if present.
-               let mut content_length = 0;
-               for line in &headers {
-                   if line.to_lowercase().starts_with("content-length:") {
-                       let parts: Vec<&str> = line.split_whitespace().collect();
-                       if parts.len() > 1 {
-                           content_length = parts[1].parse::<usize>().unwrap_or(0);
-                       }
-                   }
-               }
-
-               // Read body if Content-Length is present and greater than 0.
-               if content_length > 0 {
-                   println!("[HTTP] Body length: {}", content_length);
-                   let mut body = vec![0u8; content_length];
-
-                   buf_reader.read_exact(&mut body).unwrap();
-
-                   println!("Received body: {}", String::from_utf8_lossy(&body));
-               }
-        //handle_connection(stream);
-
-
-async fn handle_http_connection(incoming: Result<TcpStream, Error>) {
-    println!("ultima");
-    let mut stream = incoming.unwrap();
-    let mut buf_reader = BufReader::new(&stream);
-
-    let mut headers: Vec<String> = Vec::new();
-    let mut body: Vec<String> = Vec::new();
-
-    // Read headers.
-    for (index, line) in buf_reader.by_ref().lines().enumerate() {
-        let line = line.unwrap();
-        if line.is_empty() {
-            let (_headers, body_lines): (Vec<_>, Vec<_>) = buf_reader
-                .by_ref()
-                .lines()
-                .enumerate()
-                .partition(|(i, _)| i > &index);
-
-            body = body_lines
-                .into_iter()
-                .filter_map(|(_, result)| match result {
-                    Ok(string) => Some(string),
-                    Err(_) => {
-                        println!("[HTTP] Error parsing body line");
-                        None
-                    }
-                })
-                .collect();
-            break;
-        }
-        headers.push(line);
-    }
-
-    println!("[HTTP] Request headers: \n\n\r{}\n", headers.join("\n"));
-    println!("[HTTP] Request body: \n\n\r{}\n", body.join("\n"));
-    let _ = stream.write_all("HTTP/1.1 200 OK\r\n\r\n".as_bytes());
-}
- */
+} */
+////////////////////
