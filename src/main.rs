@@ -1,11 +1,10 @@
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
 use std::collections::HashMap;
-use std::hash::Hash;
-use std::sync::{Arc, Mutex};
-use std::{thread, vec};
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::RwLock;
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
 
@@ -39,7 +38,10 @@ impl Session {
     }
 }
 
-fn main() {
+type Sessions = Arc<RwLock<HashMap<String, Session>>>;
+
+#[tokio::main]
+async fn main() {
     println!("[SUIRO] Starting service");
     ctrlc::set_handler(move || {
         println!("[SUIRO] Stopping service");
@@ -50,58 +52,37 @@ fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
-    let mutex: Mutex<HashMap<String, Session>> = Mutex::new(HashMap::new());
+    let mutex: RwLock<HashMap<String, Session>> = RwLock::new(HashMap::new());
     let sessions = Arc::new(mutex);
 
-    let sessions_ref_tcp = Arc::clone(&sessions);
-    // Spawn threads for each server
-    let tcp = thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
+    let sessions_tcp = Arc::clone(&sessions);
+    let tcp = async move {
+        tcp_server(tcp_port, sessions_tcp).await;
+    };
 
-        let sessions_ref = Arc::clone(&sessions_ref_tcp);
-        runtime.block_on(async { tcp_server(tcp_port, sessions_ref).await });
-    });
+    let http = async move {
+        http_server(http_port, sessions).await;
+    };
 
-    let sessions_ref_http = Arc::clone(&sessions);
-    let http = thread::spawn(move || {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-
-        let sessions_ref = Arc::clone(&sessions_ref_http);
-        runtime.block_on(async { http_server(http_port, sessions_ref).await });
-    });
-
-    // Wait for the threads to finish
-    let _ = tcp.join();
-    let _ = http.join();
-
-    println!("{:?}", sessions);
+    futures::join!(tcp, http);
 }
 
-async fn tcp_server(port: Port, sessions_ref: Arc<Mutex<HashMap<String, Session>>>) {
+async fn tcp_server(port: Port, sessions: Sessions) {
     let listener = TcpListener::bind(("127.0.0.1", port.num)).await.unwrap();
     println!("[TCP] Waiting connections on {}", port.num);
 
     loop {
         let (socket, _) = listener.accept().await.unwrap();
-        let sessions_ref_clone = sessions_ref.clone(); // avoid sessions_ref being moved
+        let sessions_clone = sessions.clone(); // avoid sessions_ref being moved
 
         tokio::spawn(async move {
             // spawn a task for each inbound socket
-            tcp_connection_handler(socket, sessions_ref_clone).await;
+            tcp_connection_handler(socket, sessions_clone).await;
         });
     }
 }
 
-async fn tcp_connection_handler(
-    mut stream: TcpStream,
-    sessions_ref: Arc<Mutex<HashMap<String, Session>>>,
-) {
+async fn tcp_connection_handler(mut stream: TcpStream, sessions: Sessions) {
     let gen = StringGenerator::default();
     let session_id = gen.next_id();
     let session_endpoint = gen.next_id();
@@ -112,18 +93,21 @@ async fn tcp_connection_handler(
         .await
         .unwrap();
 
-    let hashmap_key = session_id.clone();
+    // --------------- HANDLE UNWRAP ----------------
+
+    // Add session to hashmap
+    let hashmap_key = session_endpoint.clone();
     let session = Session::new(session_id, session_endpoint, stream);
-    sessions_ref.lock().unwrap().insert(hashmap_key, session);
+    sessions.write().await.insert(hashmap_key, session);
 }
 
-async fn http_server(port: Port, sessions_ref: Arc<Mutex<HashMap<String, Session>>>) {
+async fn http_server(port: Port, sessions: Sessions) {
     // The address we'll bind to.
     let addr = ([127, 0, 0, 1], port.num).into();
 
     // This is our service handler. It receives a Request, processes it, and returns a Response.
     let make_service = make_service_fn(|_conn| {
-        let sessions_ref = Arc::clone(&sessions_ref);
+        let sessions_ref = Arc::clone(&sessions);
         async {
             Ok::<_, hyper::Error>(service_fn(move |req| {
                 let sessions_clone = sessions_ref.clone();
@@ -142,9 +126,24 @@ async fn http_server(port: Port, sessions_ref: Arc<Mutex<HashMap<String, Session
 
 async fn http_connection_handler(
     _req: hyper::Request<Body>,
-    sessions_ref: Arc<Mutex<HashMap<String, Session>>>,
+    sessions: Sessions,
 ) -> Result<Response<Body>, hyper::Error> {
-    println!("[HTTP] New connection {:?}", _req.uri());
-    println!("wiiii --------- {:?}", sessions_ref.lock().unwrap());
+    println!("[HTTP] New connection {:?}", _req.uri().path());
+
+    let whole_endpoint = _req.uri().path().to_string();
+    let session_endpoint = whole_endpoint.split("/").collect::<Vec<&str>>()[1];
+
+    let sessions = sessions.read().await;
+    println!("Sessionsss {:?}", sessions);
+
+    if !sessions.contains_key(session_endpoint) {
+        return Ok(Response::new(Body::from("Session not found")));
+    }
+
+    let session = sessions.get(session_endpoint);
+
+    // _req create request raw
+    //
+
     Ok(Response::new(Body::from("Hello, World!")))
 }
