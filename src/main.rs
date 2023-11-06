@@ -2,6 +2,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::vec;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::RwLock;
@@ -131,10 +132,17 @@ async fn http_connection_handler(
     println!("[HTTP] New connection {:?}", _req.uri().path());
 
     let whole_endpoint = _req.uri().path().to_string();
+    if whole_endpoint == "/" {
+        let response = Response::builder()
+            .status(200)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>Home</h1>"))
+            .unwrap();
+        return Ok(response);
+    }
+
     let session_endpoint = whole_endpoint.split("/").collect::<Vec<&str>>()[1];
-
-    let sessions = sessions.read().await;
-
+    let sessions = sessions.read().await; // get rwlock read access
     if !sessions.contains_key(session_endpoint) {
         let response = Response::builder()
             .status(404)
@@ -143,11 +151,56 @@ async fn http_connection_handler(
             .unwrap();
         return Ok(response);
     }
-
     let session = sessions.get(session_endpoint);
 
-    // _req create request raw
-    //
+    // Create raw http from request
+    // ----------------------------
+    let request_id = StringGenerator::default().next_id();
+
+    // headers
+    let http_request_info = format!(
+        "{} {} {:?}\n",
+        _req.method().as_str(),
+        _req.uri().path(),
+        _req.version()
+    );
+    let mut request = request_id.clone() + "\n" + http_request_info.as_str();
+
+    for (key, value) in _req.headers() {
+        match value.to_str() {
+            Ok(value) => request += &format!("{}: {}\n", capitilize(key.as_str()), value),
+            Err(_) => request += &format!("{}: {:?}\n", capitilize(key.as_str()), value.as_bytes()),
+        }
+    }
+
+    // body
+    let body = hyper::body::to_bytes(_req.into_body()).await;
+    if body.is_ok() {
+        let body = body.unwrap();
+        if body.len() > 0 {
+            request += &format!("\n{}", String::from_utf8(body.to_vec()).unwrap());
+        }
+    }
 
     Ok(Response::new(Body::from("Hello, World!")))
+}
+
+fn capitilize(string: &str) -> String {
+    let segments = string.split("-");
+    let mut result: Vec<String> = Vec::new();
+
+    for segment in segments {
+        let mut chars = segment.chars();
+        let mut capitalized = String::new();
+        if let Some(first_char) = chars.next() {
+            capitalized.push(first_char.to_ascii_uppercase());
+        }
+        for c in chars {
+            capitalized.push(c);
+        }
+
+        result.push(capitalized);
+    }
+
+    result.join("-")
 }
