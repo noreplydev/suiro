@@ -134,10 +134,14 @@ async fn http_connection_handler(
     let session_endpoint = whole_endpoint.split("/").collect::<Vec<&str>>()[1];
 
     let sessions = sessions.read().await;
-    println!("Sessionsss {:?}", sessions);
 
     if !sessions.contains_key(session_endpoint) {
-        return Ok(Response::new(Body::from("Session not found")));
+        let response = Response::builder()
+            .status(404)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>404 Not found</h1>"))
+            .unwrap();
+        return Ok(response);
     }
 
     let session = sessions.get(session_endpoint);
