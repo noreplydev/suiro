@@ -128,10 +128,11 @@ async fn http_connection_handler(
     _req: hyper::Request<Body>,
     sessions: Sessions,
 ) -> Result<Response<Body>, hyper::Error> {
-    println!("[HTTP] New connection {:?}", _req.uri().path());
+    let (session_endpoint, agent_request_path) = get_request_url(&_req);
+    let request_path = _req.uri().path();
+    println!("[HTTP] New connection {}", request_path);
 
-    let whole_endpoint = _req.uri().path().to_string();
-    if whole_endpoint == "/" {
+    if request_path == "/" {
         let response = Response::builder()
             .status(200)
             .header("Content-type", "text/html")
@@ -140,9 +141,8 @@ async fn http_connection_handler(
         return Ok(response);
     }
 
-    let session_endpoint = whole_endpoint.split("/").collect::<Vec<&str>>()[1];
     let mut sessions = sessions.lock().await; // get access to hashmap
-    if !sessions.contains_key(session_endpoint) {
+    if !sessions.contains_key(session_endpoint.as_str()) {
         let response = Response::builder()
             .status(404)
             .header("Content-type", "text/html")
@@ -150,7 +150,7 @@ async fn http_connection_handler(
             .unwrap();
         return Ok(response);
     }
-    let session = sessions.get_mut(session_endpoint);
+    let session = sessions.get_mut(session_endpoint.as_str());
 
     // Create raw http from request
     // ----------------------------
@@ -160,7 +160,7 @@ async fn http_connection_handler(
     let http_request_info = format!(
         "{} {} {:?}\n",
         _req.method().as_str(),
-        _req.uri().path(),
+        agent_request_path,
         _req.version()
     );
     let mut request = request_id.clone() + "\n" + http_request_info.as_str();
@@ -196,6 +196,47 @@ async fn http_connection_handler(
     // Send raw http to tcp socket
     session.socket.write(request.as_bytes()).await.unwrap();
     Ok(Response::new(Body::from("Hello, World!")))
+}
+
+fn get_request_url(_req: &hyper::Request<Body>) -> (String, String) {
+    let referer = _req.headers().get("referer");
+
+    // [no referer]
+    if !referer.is_some() {
+        let mut segments = _req.uri().path().split("/").collect::<Vec<&str>>(); // /abc/paco -> ["", "abc", "paco"]
+        let session_endpoint = segments[1].to_string();
+        segments.drain(0..2); // request path
+        println!(
+            "{} {}",
+            session_endpoint,
+            "/".to_string() + &segments.join("/")
+        );
+        return (session_endpoint, "/".to_string() + &segments.join("/"));
+    }
+
+    let referer = referer.unwrap().to_str().unwrap(); // https://localhost:8080/abc/paco
+    let mut referer = referer
+        .split("/")
+        .map(|r| r.to_string())
+        .collect::<Vec<String>>();
+    referer.drain(0..3); // drop -> "https:" + "" + "localhost:8080"
+
+    let mut url = _req
+        .uri()
+        .path()
+        .split("/")
+        .map(|r| r.to_string())
+        .filter(|r| r != "")
+        .collect::<Vec<String>>();
+
+    // [different session-endpoint]
+    if referer[0] != url[0] {
+        return (referer[0].clone(), "/".to_string() + &url.join("/"));
+    }
+
+    // [same session-endpoint]
+    url.drain(0..1);
+    return (referer[0].clone(), "/".to_string() + &url.join("/"));
 }
 
 fn capitilize(string: &str) -> String {
