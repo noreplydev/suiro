@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::mpsc;
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
 
@@ -27,16 +28,16 @@ impl Port {
 struct Session {
     session_id: String,
     session_endpoint: String,
-    socket: TcpStream,
+    socket_tx: mpsc::Sender<String>,
     responses: HashMap<String, String>,
 }
 
 impl Session {
-    fn new(id: String, endpoint: String, socket: TcpStream) -> Self {
+    fn new(id: String, endpoint: String, socket_tx: mpsc::Sender<String>) -> Self {
         Session {
             session_id: id,
             session_endpoint: endpoint,
-            socket,
+            socket_tx,
             responses: HashMap::new(),
         }
     }
@@ -96,13 +97,50 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
         .write(format!("connection\n{}", session_endpoint).as_bytes())
         .await
         .unwrap();
-
     // --------------- HANDLE UNWRAP ----------------
 
     // Add session to hashmap
     let hashmap_key = session_endpoint.clone();
-    let session = Session::new(session_id, session_endpoint, socket);
+    let (tx, mut rx) = mpsc::channel(100); // 100
+
+    let session = Session::new(session_id.clone(), session_endpoint, tx);
     sessions.lock().await.insert(hashmap_key, session);
+
+    // Handle incoming data
+    let mut buffer = [0; 1024];
+    loop {
+        if let Some(request) = rx.recv().await {
+            println!("recevice mscp");
+            socket.write(request.as_bytes()).await.unwrap();
+        }
+    }
+
+    /* loop {
+        match session.socket.read(&mut buffer).await {
+            Ok(0) => {
+                // Connection was closed
+                println!("[TCP] Connection {} closed", session_id);
+                break;
+            }
+            Ok(n) => {
+                // Data received
+                let data = &buffer[..n];
+                println!("[TCP] Received data from {}: {:?}", session_id, data);
+
+                // Handle data...
+                // For example, echo it back
+                if let Err(e) = socket.write_all(data).await {
+                    eprintln!("Failed to send data to {}: {}", session_id, e);
+                    break;
+                }
+            }
+            Err(e) => {
+                // An error occurred
+                eprintln!("Failed to read from socket {}: {}", session_id, e);
+                break;
+            }
+        }
+    } */
 }
 
 async fn http_server(port: Port, sessions: Sessions) {
@@ -198,13 +236,13 @@ async fn http_connection_handler(
     };
 
     // Send raw http to tcp socket
-    session.socket.write(request.as_bytes()).await.unwrap();
-    let max_time = 100_000; // 100 seconds
-    let mut time = 0;
-    while !session.responses.contains_key(&request_id) || time <= max_time {
-        thread::sleep(Duration::from_millis(100));
-        time += 100;
-    }
+    //session.socket.write(request.as_bytes()).await.unwrap();
+    session.socket_tx.send(request).await.unwrap();
+    println!("MSCP SENT");
+
+    /*     let max_time = 100_000; // 100 seconds
+    let mut time = 0; */
+    /* while !session.responses.contains_key(&request_id) {}
 
     if time == max_time {
         let response = Response::builder()
@@ -229,7 +267,7 @@ async fn http_connection_handler(
         }
     };
 
-    println!("Response: {}", response);
+    println!("Response: {}", response);  */
     Ok(Response::new(Body::from("Hello, World!")))
 }
 
