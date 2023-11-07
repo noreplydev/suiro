@@ -107,7 +107,6 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     sessions.lock().await.insert(hashmap_key, session);
 
     // Handle incoming data
-    let mut buffer = [0; 1024];
     loop {
         if let Some(request) = rx.recv().await {
             println!("recevice mscp");
@@ -236,15 +235,20 @@ async fn http_connection_handler(
     };
 
     // Send raw http to tcp socket
-    //session.socket.write(request.as_bytes()).await.unwrap();
     session.socket_tx.send(request).await.unwrap();
-    println!("MSCP SENT");
 
+    // Wait for response
     /*     let max_time = 100_000; // 100 seconds
     let mut time = 0; */
-    /* while !session.responses.contains_key(&request_id) {}
+    while !session.responses.contains_key(&request_id) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        /*         time += 100; */
+    }
 
-    if time == max_time {
+    let response = session.responses.remove(&request_id);
+    println!("response {:?}", response);
+
+    /* if time == max_time {
         let response = Response::builder()
             .status(500)
             .header("Content-type", "text/html")
@@ -267,7 +271,7 @@ async fn http_connection_handler(
         }
     };
 
-    println!("Response: {}", response);  */
+    println!("Response: {}", response); */
     Ok(Response::new(Body::from("Hello, World!")))
 }
 
