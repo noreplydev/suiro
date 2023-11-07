@@ -3,6 +3,8 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use unique_id::string::StringGenerator;
@@ -26,6 +28,7 @@ struct Session {
     session_id: String,
     session_endpoint: String,
     socket: TcpStream,
+    responses: HashMap<String, String>,
 }
 
 impl Session {
@@ -34,6 +37,7 @@ impl Session {
             session_id: id,
             session_endpoint: endpoint,
             socket,
+            responses: HashMap::new(),
         }
     }
 }
@@ -195,6 +199,37 @@ async fn http_connection_handler(
 
     // Send raw http to tcp socket
     session.socket.write(request.as_bytes()).await.unwrap();
+    let max_time = 100_000; // 100 seconds
+    let mut time = 0;
+    while !session.responses.contains_key(&request_id) || time <= max_time {
+        thread::sleep(Duration::from_millis(100));
+        time += 100;
+    }
+
+    if time == max_time {
+        let response = Response::builder()
+            .status(500)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>524 A timeout error ocurred</h1>"))
+            .unwrap();
+        return Ok(response);
+    }
+
+    // Get response from hashmap and remove it
+    let response = session.responses.remove(&request_id);
+    let response = match response {
+        Some(response) => response,
+        None => {
+            let response = Response::builder()
+                .status(500)
+                .header("Content-type", "text/html")
+                .body(Body::from("<h1>500 Internal server error</h1>"))
+                .unwrap();
+            return Ok(response);
+        }
+    };
+
+    println!("Response: {}", response);
     Ok(Response::new(Body::from("Hello, World!")))
 }
 
