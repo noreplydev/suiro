@@ -238,17 +238,17 @@ async fn http_connection_handler(
     session.socket_tx.send(request).await.unwrap();
 
     // Wait for response
-    /*     let max_time = 100_000; // 100 seconds
-    let mut time = 0; */
-    while !session.responses.contains_key(&request_id) {
+    let max_time = 100_000; // 100 seconds
+    let mut time = 0;
+    while !session.responses.contains_key(&request_id) && time < max_time {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        /*         time += 100; */
+        time += 100;
     }
 
     let response = session.responses.remove(&request_id);
     println!("response {:?}", response);
 
-    /* if time == max_time {
+    if time >= max_time {
         let response = Response::builder()
             .status(500)
             .header("Content-type", "text/html")
@@ -257,6 +257,7 @@ async fn http_connection_handler(
         return Ok(response);
     }
 
+    /*
     // Get response from hashmap and remove it
     let response = session.responses.remove(&request_id);
     let response = match response {
