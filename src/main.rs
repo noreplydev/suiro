@@ -1,11 +1,10 @@
+use futures::lock::Mutex;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::vec;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
 use unique_id::string::StringGenerator;
 use unique_id::Generator;
 
@@ -39,7 +38,7 @@ impl Session {
     }
 }
 
-type Sessions = Arc<RwLock<HashMap<String, Session>>>;
+type Sessions = Arc<Mutex<HashMap<String, Session>>>;
 
 #[tokio::main]
 async fn main() {
@@ -53,7 +52,7 @@ async fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
-    let mutex: RwLock<HashMap<String, Session>> = RwLock::new(HashMap::new());
+    let mutex: Mutex<HashMap<String, Session>> = Mutex::new(HashMap::new());
     let sessions = Arc::new(mutex);
 
     let sessions_tcp = Arc::clone(&sessions);
@@ -83,13 +82,13 @@ async fn tcp_server(port: Port, sessions: Sessions) {
     }
 }
 
-async fn tcp_connection_handler(mut stream: TcpStream, sessions: Sessions) {
+async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let gen = StringGenerator::default();
     let session_id = gen.next_id();
     let session_endpoint = gen.next_id();
 
     println!("[TCP] New connection {}: /{}", session_id, session_endpoint);
-    stream
+    socket
         .write(format!("connection\n{}", session_endpoint).as_bytes())
         .await
         .unwrap();
@@ -98,8 +97,8 @@ async fn tcp_connection_handler(mut stream: TcpStream, sessions: Sessions) {
 
     // Add session to hashmap
     let hashmap_key = session_endpoint.clone();
-    let session = Session::new(session_id, session_endpoint, stream);
-    sessions.write().await.insert(hashmap_key, session);
+    let session = Session::new(session_id, session_endpoint, socket);
+    sessions.lock().await.insert(hashmap_key, session);
 }
 
 async fn http_server(port: Port, sessions: Sessions) {
@@ -142,7 +141,7 @@ async fn http_connection_handler(
     }
 
     let session_endpoint = whole_endpoint.split("/").collect::<Vec<&str>>()[1];
-    let sessions = sessions.read().await; // get rwlock read access
+    let mut sessions = sessions.lock().await; // get access to hashmap
     if !sessions.contains_key(session_endpoint) {
         let response = Response::builder()
             .status(404)
@@ -151,7 +150,7 @@ async fn http_connection_handler(
             .unwrap();
         return Ok(response);
     }
-    let session = sessions.get(session_endpoint);
+    let session = sessions.get_mut(session_endpoint);
 
     // Create raw http from request
     // ----------------------------
@@ -182,6 +181,20 @@ async fn http_connection_handler(
         }
     }
 
+    let session = match session {
+        Some(session) => session,
+        None => {
+            let response = Response::builder()
+                .status(500)
+                .header("Content-type", "text/html")
+                .body(Body::from("<h1>500 Internal server error</h1>"))
+                .unwrap();
+            return Ok(response);
+        }
+    };
+
+    // Send raw http to tcp socket
+    session.socket.write(request.as_bytes()).await.unwrap();
     Ok(Response::new(Body::from("Hello, World!")))
 }
 
