@@ -114,7 +114,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let mut packet_total_size = 0;
     let mut packet_acc_size = 0;
 
-    let mut buffer = [0; 1024];
+    let mut buffer = [0; 312500];
     loop {
         // Write data to socket on request
         if let Some(request) = rx.recv().now_or_never() {
@@ -142,7 +142,9 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                         if packet_request_id != "".to_string() {
                             let cur_packet_data = String::from_utf8(data.to_vec()).unwrap();
                             packet_acc_data = format!("{}{}", packet_acc_data, cur_packet_data);
-                            packet_acc_size += data.len();
+                            packet_acc_size = packet_acc_size + cur_packet_data.as_bytes().len();
+
+                            println!(" curr {} --- total {}", packet_acc_size, packet_total_size);
 
                             if packet_acc_size == packet_total_size {
                                 println!("[TCP] Data on: {}", session_id);
