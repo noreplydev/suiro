@@ -25,22 +25,16 @@ impl Port {
 
 #[derive(Debug)]
 struct Session {
-    session_id: String,
-    session_endpoint: String,
     socket_tx: mpsc::Sender<String>,
     responses_rx: mpsc::Receiver<(String, String)>,
 }
 
 impl Session {
     fn new(
-        id: String,
-        endpoint: String,
         socket_tx: mpsc::Sender<String>,
         responses_rx: mpsc::Receiver<(String, String)>,
     ) -> Self {
         Session {
-            session_id: id,
-            session_endpoint: endpoint,
             socket_tx,
             responses_rx,
         }
@@ -107,12 +101,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let hashmap_key = session_endpoint.clone();
     let (socket_tx, mut rx) = mpsc::channel(100); // 100 message queue
     let (tx, responses_rx) = mpsc::channel(100); // 100 message queue
-    let session = Session::new(
-        session_id.clone(),
-        session_endpoint.clone(),
-        socket_tx,
-        responses_rx,
-    );
+    let session = Session::new(socket_tx, responses_rx);
     sessions.lock().await.insert(hashmap_key, session);
 
     // Handle incoming data
@@ -144,23 +133,15 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                     Ok(n) => {
                         // data received
                         let data = &buffer[..n];
-                        println!("----------HOLA----------");
 
                         // Packet fragmentation?
                         if packet_request_id != "".to_string() {
-                            println!("hola bloqeuado -1");
-
                             let cur_packet_data = String::from_utf8(data.to_vec()).unwrap();
                             packet_acc_data = format!("{}{}", packet_acc_data, cur_packet_data);
                             packet_acc_size += data.len();
 
                             if packet_acc_size == packet_total_size {
                                 println!("[TCP] Data on: {}", session_id);
-                                println!(
-                                    "request id---, {} {}",
-                                    packet_request_id,
-                                    packet_acc_data.to_string()
-                                );
 
                                 // Add data to responses hashmap
                                 let _ = tx
@@ -185,13 +166,9 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                         let packet_size = packet_header_split.next().unwrap();
                         let packet_size = packet_size.parse::<usize>().unwrap();
 
-                        println!("hola bloqeuado");
-
                         // First packet appear, is complete?
                         if packet_size == packet_data.as_bytes().len() {
                             println!("[TCP] Data on: {}", session_id);
-
-                            println!("hola bloqeuado 2");
 
                             // Add data to responses hashmap
                             let _ = tx
@@ -199,7 +176,6 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                                 .await;
                         } else {
                             // Packet is not complete
-                            println!("hola bloqeuado 3");
                             packet_request_id = request_id.to_string();
                             packet_acc_data = packet_data.to_string();
                             packet_acc_size = packet_data.as_bytes().len();
