@@ -1,3 +1,5 @@
+use base64::engine::general_purpose;
+use base64::Engine;
 use futures::lock::Mutex;
 use futures::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
@@ -281,6 +283,7 @@ async fn http_connection_handler(
     let session = match session {
         Some(session) => session,
         None => {
+            println!("es aqui");
             let response = Response::builder()
                 .status(500)
                 .header("Content-type", "text/html")
@@ -294,7 +297,7 @@ async fn http_connection_handler(
     session.socket_tx.send(request).await.unwrap();
 
     // Wait for response
-    let max_time = 5000; // 100 seconds
+    let max_time = 100_000; // 100 seconds
     let mut time = 0;
     let mut http_raw_response = String::from("");
     loop {
@@ -318,7 +321,7 @@ async fn http_connection_handler(
 
     if time >= max_time {
         let response = Response::builder()
-            .status(500)
+            .status(524)
             .header("Content-type", "text/html")
             .body(Body::from("<h1>524 A timeout error ocurred</h1>"))
             .unwrap();
@@ -373,6 +376,30 @@ async fn http_connection_handler(
     let response: Response<Body>;
     if body.is_some() {
         let _body = body.unwrap().to_string();
+        let _body = general_purpose::STANDARD.decode(_body);
+        let _body = match _body {
+            Ok(_body) => match String::from_utf8(_body) {
+                Ok(_body) => _body,
+                Err(_) => {
+                    println!("Error converting body");
+                    let response = Response::builder()
+                        .status(500)
+                        .header("Content-type", "text/html")
+                        .body(Body::from("<h1>500 Internal server error</h1>"))
+                        .unwrap();
+                    return Ok(response);
+                }
+            },
+            Err(_) => {
+                println!("Error decoding body");
+                let response = Response::builder()
+                    .status(500)
+                    .header("Content-type", "text/html")
+                    .body(Body::from("<h1>500 Internal server error</h1>"))
+                    .unwrap();
+                return Ok(response);
+            }
+        };
         println!("body {:?}", _body.as_bytes().len());
         let hyper_body = Body::from(_body);
         response = response_builder.body(hyper_body).unwrap();
