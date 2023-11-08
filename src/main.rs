@@ -28,16 +28,21 @@ struct Session {
     session_id: String,
     session_endpoint: String,
     socket_tx: mpsc::Sender<String>,
-    responses: HashMap<String, String>,
+    responses_rx: mpsc::Receiver<(String, String)>,
 }
 
 impl Session {
-    fn new(id: String, endpoint: String, socket_tx: mpsc::Sender<String>) -> Self {
+    fn new(
+        id: String,
+        endpoint: String,
+        socket_tx: mpsc::Sender<String>,
+        responses_rx: mpsc::Receiver<(String, String)>,
+    ) -> Self {
         Session {
             session_id: id,
             session_endpoint: endpoint,
             socket_tx,
-            responses: HashMap::new(),
+            responses_rx,
         }
     }
 }
@@ -100,8 +105,14 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
 
     // Add session to hashmap
     let hashmap_key = session_endpoint.clone();
-    let (tx, mut rx) = mpsc::channel(100); // 100 message queue
-    let session = Session::new(session_id.clone(), session_endpoint.clone(), tx);
+    let (socket_tx, mut rx) = mpsc::channel(100); // 100 message queue
+    let (tx, responses_rx) = mpsc::channel(100); // 100 message queue
+    let session = Session::new(
+        session_id.clone(),
+        session_endpoint.clone(),
+        socket_tx,
+        responses_rx,
+    );
     sessions.lock().await.insert(hashmap_key, session);
 
     // Handle incoming data
@@ -152,11 +163,9 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                                 );
 
                                 // Add data to responses hashmap
-                                let mut sessions = sessions.lock().await;
-                                let session = sessions.get_mut(session_endpoint.as_str()).unwrap();
-                                session
-                                    .responses
-                                    .insert(packet_request_id, packet_acc_data.to_string());
+                                let _ = tx
+                                    .send((packet_request_id, packet_acc_data.to_string()))
+                                    .await;
 
                                 packet_acc_size = 0;
                                 packet_total_size = 0;
@@ -185,11 +194,9 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                             println!("hola bloqeuado 2");
 
                             // Add data to responses hashmap
-                            let mut sessions = sessions.lock().await;
-                            let session = sessions.get_mut(session_endpoint.as_str()).unwrap();
-                            session
-                                .responses
-                                .insert(request_id.to_string(), packet_data.to_string());
+                            let _ = tx
+                                .send((request_id.to_string(), packet_data.to_string()))
+                                .await;
                         } else {
                             // Packet is not complete
                             println!("hola bloqeuado 3");
@@ -309,16 +316,30 @@ async fn http_connection_handler(
     session.socket_tx.send(request).await.unwrap();
 
     // Wait for response
-    let max_time = 100_000; // 100 seconds
+    let max_time = 5000; // 100 seconds
     let mut time = 0;
-    println!("request id, {}", request_id);
-    while !session.responses.contains_key(&request_id) && time < max_time {
+    let mut http_raw_response = String::from("");
+    loop {
+        // Check if response is ready
+        if let Some(agent_response) = session.responses_rx.recv().now_or_never() {
+            let agent_response = agent_response.unwrap();
+            if request_id == agent_response.0 {
+                http_raw_response = agent_response.1;
+                break;
+            }
+        }
+
+        // Check if timeout
+        if time >= max_time {
+            break;
+        }
+
         tokio::time::sleep(Duration::from_millis(100)).await;
         time += 100;
     }
 
-    let response = session.responses.remove(&request_id);
-    println!("response {:?}", response);
+    println!("-------------------");
+    println!("response {:?}", http_raw_response);
 
     if time >= max_time {
         let response = Response::builder()
