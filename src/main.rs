@@ -2,7 +2,9 @@ use futures::lock::Mutex;
 use futures::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
+use serde_json::{Result as SerdeResult, Value};
 use std::collections::HashMap;
+use std::result::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -314,9 +316,6 @@ async fn http_connection_handler(
         time += 100;
     }
 
-    println!("-------------------");
-    println!("response {:?}", http_raw_response);
-
     if time >= max_time {
         let response = Response::builder()
             .status(500)
@@ -326,23 +325,62 @@ async fn http_connection_handler(
         return Ok(response);
     }
 
-    /*
-    // Get response from hashmap and remove it
-    let response = session.responses.remove(&request_id);
-    let response = match response {
-        Some(response) => response,
-        None => {
-            let response = Response::builder()
-                .status(500)
-                .header("Content-type", "text/html")
-                .body(Body::from("<h1>500 Internal server error</h1>"))
-                .unwrap();
-            return Ok(response);
-        }
-    };
+    println!("-------------------");
+    println!("response {:?}", http_raw_response);
+    let http_response_result: SerdeResult<Value> = serde_json::from_str(http_raw_response.as_str());
+    let http_response = http_response_result.unwrap();
 
-    println!("Response: {}", response); */
-    Ok(Response::new(Body::from("Hello, World!")))
+    // Build response
+    let status_code = match http_response["statusCode"].as_i64() {
+        Some(status_code) => status_code as u16,
+        None => 0,
+    };
+    let default_headers = serde_json::Map::new();
+    let headers = match http_response["headers"].as_object() {
+        Some(headers) => headers,
+        None => &default_headers,
+    };
+    let body = http_response["body"].as_str();
+
+    if status_code == 0 {
+        println!("[HTTP] 570 Status on {}", session_endpoint);
+        let response = Response::builder()
+            .status(570)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>570 Agent bad response</h1>"))
+            .unwrap();
+        return Ok(response);
+    }
+
+    if headers.keys().len() < 1 {
+        println!("[HTTP] 570 Status on {}", session_endpoint);
+        let response = Response::builder()
+            .status(570)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>570 Agent bad response</h1>"))
+            .unwrap();
+        return Ok(response);
+    }
+
+    let mut response_builder = Response::builder().status(status_code);
+    for (key, value) in headers {
+        response_builder = response_builder.header(
+            key,
+            hyper::header::HeaderValue::from_str(value.as_str().unwrap()).unwrap(),
+        );
+    }
+
+    let response: Response<Body>;
+    if body.is_some() {
+        let _body = body.unwrap().to_string();
+        println!("body {:?}", _body.as_bytes().len());
+        let hyper_body = Body::from(_body);
+        response = response_builder.body(hyper_body).unwrap();
+    } else {
+        response = response_builder.body(Body::empty()).unwrap();
+    }
+
+    return Ok(response);
 }
 
 fn get_request_url(_req: &hyper::Request<Body>) -> (String, String) {
