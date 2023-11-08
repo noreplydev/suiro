@@ -101,45 +101,43 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
 
     // Add session to hashmap
     let hashmap_key = session_endpoint.clone();
-    let (tx, mut rx) = mpsc::channel(100); // 100
-
+    let (tx, mut rx) = mpsc::channel(100); // 100 message queue
     let session = Session::new(session_id.clone(), session_endpoint, tx);
     sessions.lock().await.insert(hashmap_key, session);
 
     // Handle incoming data
+    let mut buffer = [0; 1024];
     loop {
+        // Write data to socket on request
         if let Some(request) = rx.recv().await {
-            println!("recevice mscp");
             socket.write(request.as_bytes()).await.unwrap();
         }
-    }
 
-    /* loop {
-        match session.socket.read(&mut buffer).await {
+        match socket.read(&mut buffer).await {
             Ok(0) => {
                 // Connection was closed
-                println!("[TCP] Connection {} closed", session_id);
+                println!("[TCP] Connection closed: {}", session_id);
                 break;
             }
             Ok(n) => {
                 // Data received
                 let data = &buffer[..n];
-                println!("[TCP] Received data from {}: {:?}", session_id, data);
-
-                // Handle data...
-                // For example, echo it back
-                if let Err(e) = socket.write_all(data).await {
-                    eprintln!("Failed to send data to {}: {}", session_id, e);
-                    break;
-                }
+                println!("[TCP] Data on: {}", session_id);
+                println!(
+                    "DATAAA ------------- \n {}",
+                    String::from_utf8(data.to_vec()).unwrap()
+                );
             }
             Err(e) => {
                 // An error occurred
-                eprintln!("Failed to read from socket {}: {}", session_id, e);
+                eprintln!(
+                    "[TCP] Error on socket connection: {} \n\n {}",
+                    session_id, e
+                );
                 break;
             }
         }
-    } */
+    }
 }
 
 async fn http_server(port: Port, sessions: Sessions) {
@@ -161,7 +159,7 @@ async fn http_server(port: Port, sessions: Sessions) {
     println!("[HTTP] Waiting connections on {}", port.num);
 
     if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
+        eprintln!("[HTTP] server error: {}", e);
     }
 }
 
@@ -196,7 +194,6 @@ async fn http_connection_handler(
     // Create raw http from request
     // ----------------------------
     let request_id = StringGenerator::default().next_id();
-
     // headers
     let http_request_info = format!(
         "{} {} {:?}\n",
@@ -284,11 +281,6 @@ fn get_request_url(_req: &hyper::Request<Body>) -> (String, String) {
         let mut segments = _req.uri().path().split("/").collect::<Vec<&str>>(); // /abc/paco -> ["", "abc", "paco"]
         let session_endpoint = segments[1].to_string();
         segments.drain(0..2); // request path
-        println!(
-            "{} {}",
-            session_endpoint,
-            "/".to_string() + &segments.join("/")
-        );
         return (session_endpoint, "/".to_string() + &segments.join("/"));
     }
 
