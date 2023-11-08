@@ -1,15 +1,14 @@
 use futures::lock::Mutex;
+use futures::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
-use unique_id::string::StringGenerator;
-use unique_id::Generator;
+use unique_id::{string::StringGenerator, Generator};
 
 struct Port {
     num: u16,
@@ -102,40 +101,115 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     // Add session to hashmap
     let hashmap_key = session_endpoint.clone();
     let (tx, mut rx) = mpsc::channel(100); // 100 message queue
-    let session = Session::new(session_id.clone(), session_endpoint, tx);
+    let session = Session::new(session_id.clone(), session_endpoint.clone(), tx);
     sessions.lock().await.insert(hashmap_key, session);
 
     // Handle incoming data
+    let mut packet_request_id = "".to_string();
+    let mut packet_acc_data = "".to_string();
+    let mut packet_total_size = 0;
+    let mut packet_acc_size = 0;
+
     let mut buffer = [0; 1024];
     loop {
         // Write data to socket on request
-        if let Some(request) = rx.recv().await {
-            socket.write(request.as_bytes()).await.unwrap();
+        if let Some(request) = rx.recv().now_or_never() {
+            match request {
+                Some(request) => {
+                    socket.write(request.as_bytes()).await.unwrap();
+                }
+                None => {}
+            }
         }
 
-        match socket.read(&mut buffer).await {
-            Ok(0) => {
-                // Connection was closed
-                println!("[TCP] Connection closed: {}", session_id);
-                break;
+        match socket.read(&mut buffer).now_or_never() {
+            Some(sock) => {
+                match sock {
+                    Ok(0) => {
+                        // connection closed
+                        println!("[TCP] Connection closed: {}", session_id);
+                        break;
+                    }
+                    Ok(n) => {
+                        // data received
+                        let data = &buffer[..n];
+                        println!("----------HOLA----------");
+
+                        // Packet fragmentation?
+                        if packet_request_id != "".to_string() {
+                            println!("hola bloqeuado -1");
+
+                            let cur_packet_data = String::from_utf8(data.to_vec()).unwrap();
+                            packet_acc_data = format!("{}{}", packet_acc_data, cur_packet_data);
+                            packet_acc_size += data.len();
+
+                            if packet_acc_size == packet_total_size {
+                                println!("[TCP] Data on: {}", session_id);
+                                println!(
+                                    "request id---, {} {}",
+                                    packet_request_id,
+                                    packet_acc_data.to_string()
+                                );
+
+                                // Add data to responses hashmap
+                                let mut sessions = sessions.lock().await;
+                                let session = sessions.get_mut(session_endpoint.as_str()).unwrap();
+                                session
+                                    .responses
+                                    .insert(packet_request_id, packet_acc_data.to_string());
+
+                                packet_acc_size = 0;
+                                packet_total_size = 0;
+                                packet_acc_data = "".to_string();
+                                packet_request_id = "".to_string();
+                            }
+                            continue;
+                        }
+
+                        let packet_string = String::from_utf8(data.to_vec()).unwrap();
+                        let mut packet_split = packet_string.split("\n\n\n");
+                        let packet_header = packet_split.next().unwrap();
+                        let packet_data = packet_split.next().unwrap();
+
+                        let mut packet_header_split = packet_header.split(":::");
+                        let request_id = packet_header_split.next().unwrap();
+                        let packet_size = packet_header_split.next().unwrap();
+                        let packet_size = packet_size.parse::<usize>().unwrap();
+
+                        println!("hola bloqeuado");
+
+                        // First packet appear, is complete?
+                        if packet_size == packet_data.as_bytes().len() {
+                            println!("[TCP] Data on: {}", session_id);
+
+                            println!("hola bloqeuado 2");
+
+                            // Add data to responses hashmap
+                            let mut sessions = sessions.lock().await;
+                            let session = sessions.get_mut(session_endpoint.as_str()).unwrap();
+                            session
+                                .responses
+                                .insert(request_id.to_string(), packet_data.to_string());
+                        } else {
+                            // Packet is not complete
+                            println!("hola bloqeuado 3");
+                            packet_request_id = request_id.to_string();
+                            packet_acc_data = packet_data.to_string();
+                            packet_acc_size = packet_data.as_bytes().len();
+                            packet_total_size = packet_size;
+                        }
+                    }
+                    Err(e) => {
+                        // error
+                        eprintln!(
+                            "[TCP] Error on socket connection: {} \n\n {}",
+                            session_id, e
+                        );
+                        break;
+                    }
+                }
             }
-            Ok(n) => {
-                // Data received
-                let data = &buffer[..n];
-                println!("[TCP] Data on: {}", session_id);
-                println!(
-                    "DATAAA ------------- \n {}",
-                    String::from_utf8(data.to_vec()).unwrap()
-                );
-            }
-            Err(e) => {
-                // An error occurred
-                eprintln!(
-                    "[TCP] Error on socket connection: {} \n\n {}",
-                    session_id, e
-                );
-                break;
-            }
+            _ => {}
         }
     }
 }
@@ -237,6 +311,7 @@ async fn http_connection_handler(
     // Wait for response
     let max_time = 100_000; // 100 seconds
     let mut time = 0;
+    println!("request id, {}", request_id);
     while !session.responses.contains_key(&request_id) && time < max_time {
         tokio::time::sleep(Duration::from_millis(100)).await;
         time += 100;
