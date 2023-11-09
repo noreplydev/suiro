@@ -75,7 +75,7 @@ async fn main() {
 }
 
 async fn tcp_server(port: Port, sessions: Sessions) {
-    let listener = TcpListener::bind(("127.0.0.1", port.num)).await.unwrap();
+    let listener = TcpListener::bind(("0.0.0.0", port.num)).await.unwrap();
     println!("[TCP] Waiting connections on {}", port.num);
 
     loop {
@@ -95,13 +95,12 @@ async fn tcp_server(port: Port, sessions: Sessions) {
 }
 
 async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
-    let gen = StringGenerator::default();
-    let session_id = gen.next_id();
-    let session_endpoint = gen.next_id();
+    let session_id = StringGenerator::default().next_id();
+    let session_endpoint = StringGenerator::default().next_id();
 
     println!("[TCP] New connection {}: /{}", session_id, session_endpoint);
     socket // write request to the agent socket
-        .write(format!("connection\n{}", session_endpoint).as_bytes())
+        .write_all(format!("connection\n{}", session_endpoint).as_bytes())
         .await
         .unwrap(); // handle unwrap...
 
@@ -120,7 +119,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let mut packet_total_size = 0;
     let mut packet_acc_size = 0;
 
-    let mut buffer = [0; 312500]; // 32 Kb
+    let mut buffer = [0; 31250]; // 32 Kb
     loop {
         // Write data to socket on request
         if let Some(request) = rx.recv().now_or_never() {
