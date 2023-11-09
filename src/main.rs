@@ -144,8 +144,6 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                             packet_acc_data = format!("{}{}", packet_acc_data, cur_packet_data);
                             packet_acc_size = packet_acc_size + cur_packet_data.as_bytes().len();
 
-                            println!(" curr {} --- total {}", packet_acc_size, packet_total_size);
-
                             if packet_acc_size == packet_total_size {
                                 println!("[TCP] Data on: {}", session_id);
 
@@ -231,10 +229,11 @@ async fn http_connection_handler(
     sessions: Sessions,
 ) -> Result<Response<Body>, hyper::Error> {
     let (session_endpoint, agent_request_path) = get_request_url(&_req);
-    let request_path = _req.uri().path();
+    let uri = _req.uri().clone();
+    let request_path = uri.path().clone();
     println!("[HTTP] New connection {}", request_path);
 
-    if request_path == "/" {
+    if request_path.to_string().clone() == "/".to_string() {
         let response = Response::builder()
             .status(200)
             .header("Content-type", "text/html")
@@ -330,8 +329,6 @@ async fn http_connection_handler(
         return Ok(response);
     }
 
-    println!("-------------------");
-    println!("response {:?}", http_raw_response);
     let http_response_result: SerdeResult<Value> = serde_json::from_str(http_raw_response.as_str());
     let http_response = http_response_result.unwrap();
 
@@ -369,10 +366,12 @@ async fn http_connection_handler(
 
     let mut response_builder = Response::builder().status(status_code);
     for (key, value) in headers {
-        response_builder = response_builder.header(
-            key,
-            hyper::header::HeaderValue::from_str(value.as_str().unwrap()).unwrap(),
-        );
+        if (key != "Content-Length") && (key != "content-length") {
+            response_builder = response_builder.header(
+                key,
+                hyper::header::HeaderValue::from_str(value.as_str().unwrap()).unwrap(),
+            );
+        }
     }
 
     let response: Response<Body>;
@@ -402,13 +401,13 @@ async fn http_connection_handler(
                 return Ok(response);
             }
         };
-        println!("body {:?}", _body.as_bytes().len());
         let hyper_body = Body::from(_body);
         response = response_builder.body(hyper_body).unwrap();
     } else {
         response = response_builder.body(Body::empty()).unwrap();
     }
 
+    println!("[HTTP] 200 Status on {}", request_path);
     return Ok(response);
 }
 
