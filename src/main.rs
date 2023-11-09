@@ -79,7 +79,12 @@ async fn tcp_server(port: Port, sessions: Sessions) {
     println!("[TCP] Waiting connections on {}", port.num);
 
     loop {
-        let (socket, _) = listener.accept().await.unwrap();
+        let (socket, _) = match listener.accept().await {
+            Ok((socket, addr)) => (socket, addr),
+            Err(_) => {
+                continue;
+            }
+        };
         let sessions_clone = sessions.clone(); // avoid sessions_ref being moved
 
         tokio::spawn(async move {
@@ -95,21 +100,19 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let session_endpoint = gen.next_id();
 
     println!("[TCP] New connection {}: /{}", session_id, session_endpoint);
-    socket
+    socket // write request to the agent socket
         .write(format!("connection\n{}", session_endpoint).as_bytes())
         .await
-        .unwrap();
-    // --------------- HANDLE UNWRAP ----------------
+        .unwrap(); // handle unwrap...
 
     // Add session to hashmap
     let hashmap_key = session_endpoint.clone();
     let (socket_tx, mut rx) = mpsc::channel(100); // 100 message queue
     let (tx, responses_rx) = mpsc::channel(100); // 100 message queue
     let session = Session::new(socket_tx, responses_rx);
-    sessions.lock().await.insert(hashmap_key, session);
-    /*     {
+    {
         sessions.lock().await.insert(hashmap_key, session); // create a block to avoid infinite lock
-    } */
+    }
 
     // Handle incoming data
     let mut packet_request_id = "".to_string();
@@ -251,6 +254,17 @@ async fn http_connection_handler(
     let uri = _req.uri().clone();
     let request_path = uri.path().clone();
     println!("[HTTP] {}", request_path);
+
+    // avoid websocket
+    if _req.headers().contains_key("upgrade") {
+        println!("[HTTP](ws) 403 Status on {}", request_path);
+        let response = Response::builder()
+            .status(404)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>404 Not found</h1>"))
+            .unwrap();
+        return Ok(response);
+    }
 
     if request_path.to_string().clone() == "/".to_string() {
         let response = Response::builder()
