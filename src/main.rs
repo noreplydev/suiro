@@ -222,7 +222,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
 
 async fn http_server(port: Port, sessions: Sessions) {
     // The address we'll bind to.
-    let addr = ([127, 0, 0, 1], port.num).into();
+    let addr = ([0, 0, 0, 0], port.num).into();
 
     // This is our service handler. It receives a Request, processes it, and returns a Response.
     let make_service = make_service_fn(|_conn| {
