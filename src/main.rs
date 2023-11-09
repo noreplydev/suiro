@@ -107,6 +107,9 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let (tx, responses_rx) = mpsc::channel(100); // 100 message queue
     let session = Session::new(socket_tx, responses_rx);
     sessions.lock().await.insert(hashmap_key, session);
+    /*     {
+        sessions.lock().await.insert(hashmap_key, session); // create a block to avoid infinite lock
+    } */
 
     // Handle incoming data
     let mut packet_request_id = "".to_string();
@@ -114,7 +117,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let mut packet_total_size = 0;
     let mut packet_acc_size = 0;
 
-    let mut buffer = [0; 312500];
+    let mut buffer = [0; 312500]; // 32 Kb
     loop {
         // Write data to socket on request
         if let Some(request) = rx.recv().now_or_never() {
@@ -138,9 +141,26 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                         // data received
                         let data = &buffer[..n];
 
+                        // check packet integrity
+                        let cur_packet_data = String::from_utf8(data.to_vec());
+                        let cur_packet_data = match cur_packet_data {
+                            Ok(cur_packet_data) => cur_packet_data,
+                            Err(_) => {
+                                eprintln!("[TCP] EPACKGRAG: Not valid utf8");
+                                // Add data to responses hashmap
+                                let _ = tx.send((packet_request_id, "EPACKFRAG".to_string())).await;
+
+                                packet_acc_size = 0;
+                                packet_total_size = 0;
+                                packet_acc_data = "".to_string();
+                                packet_request_id = "".to_string();
+
+                                continue;
+                            }
+                        };
+
                         // Packet fragmentation?
                         if packet_request_id != "".to_string() {
-                            let cur_packet_data = String::from_utf8(data.to_vec()).unwrap();
                             packet_acc_data = format!("{}{}", packet_acc_data, cur_packet_data);
                             packet_acc_size = packet_acc_size + cur_packet_data.as_bytes().len();
 
@@ -160,8 +180,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                             continue;
                         }
 
-                        let packet_string = String::from_utf8(data.to_vec()).unwrap();
-                        let mut packet_split = packet_string.split("\n\n\n");
+                        let mut packet_split = cur_packet_data.split("\n\n\n");
                         let packet_header = packet_split.next().unwrap();
                         let packet_data = packet_split.next().unwrap();
 
@@ -231,7 +250,7 @@ async fn http_connection_handler(
     let (session_endpoint, agent_request_path) = get_request_url(&_req);
     let uri = _req.uri().clone();
     let request_path = uri.path().clone();
-    println!("[HTTP] New connection {}", request_path);
+    println!("[HTTP] {}", request_path);
 
     if request_path.to_string().clone() == "/".to_string() {
         let response = Response::builder()
@@ -242,7 +261,7 @@ async fn http_connection_handler(
         return Ok(response);
     }
 
-    let mut sessions = sessions.lock().await; // get access to hashmap
+    let mut sessions = sessions.lock().await; // get access to hashmap - very dangerous
     if !sessions.contains_key(session_endpoint.as_str()) {
         let response = Response::builder()
             .status(404)
@@ -295,7 +314,19 @@ async fn http_connection_handler(
     };
 
     // Send raw http to tcp socket
-    session.socket_tx.send(request).await.unwrap();
+    let sent = session.socket_tx.send(request).await;
+    match sent {
+        Ok(_) => {}
+        Err(_) => {
+            println!("[HTTP] 500 Status on {}", session_endpoint);
+            let response = Response::builder()
+                .status(500)
+                .header("Content-type", "text/html")
+                .body(Body::from("<h1>500 Internal server error</h1>"))
+                .unwrap();
+            return Ok(response);
+        }
+    }
 
     // Wait for response
     let max_time = 100_000; // 100 seconds
@@ -325,6 +356,17 @@ async fn http_connection_handler(
             .status(524)
             .header("Content-type", "text/html")
             .body(Body::from("<h1>524 A timeout error ocurred</h1>"))
+            .unwrap();
+        return Ok(response);
+    }
+
+    // Check integrity of response [Packet fragmentation error]
+    if http_raw_response == "EPACKFRAG".to_string() {
+        println!("[HTTP] 500 Status on {}", session_endpoint);
+        let response = Response::builder()
+            .status(500)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>500 Internal server error</h1>"))
             .unwrap();
         return Ok(response);
     }
