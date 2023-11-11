@@ -62,13 +62,12 @@ async fn main() {
     let mutex: Mutex<HashMap<String, Session>> = Mutex::new(HashMap::new());
     let sessions = Arc::new(mutex);
 
-    let sessions_tcp = Arc::clone(&sessions);
-    let tcp = async move {
-        tcp_server(tcp_port, sessions_tcp).await;
+    let tcp = async {
+        tcp_server(tcp_port, sessions.clone()).await;
     };
 
-    let http = async move {
-        http_server(http_port, sessions).await;
+    let http = async {
+        http_server(http_port, sessions.clone()).await;
     };
 
     futures::join!(tcp, http);
@@ -79,15 +78,12 @@ async fn tcp_server(port: Port, sessions: Sessions) {
     println!("[TCP] Waiting connections on {}", port.num);
 
     loop {
-        let (socket, _) = match listener.accept().await {
-            Ok((socket, addr)) => (socket, addr),
-            Err(_) => {
-                continue;
-            }
+        let Ok((socket, _addr)) = listener.accept().await else {
+            continue;
         };
-        let sessions_clone = sessions.clone(); // avoid sessions_ref being moved
 
-        tokio::spawn(async move {
+        let sessions_clone = sessions.clone();
+        tokio::spawn(async {
             // spawn a task for each inbound socket
             tcp_connection_handler(socket, sessions_clone).await;
         });
@@ -98,9 +94,9 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let session_id = StringGenerator::default().next_id();
     let session_endpoint = StringGenerator::default().next_id();
 
-    println!("[TCP] New connection {}: /{}", session_id, session_endpoint);
+    println!("[TCP] New connection {session_id}: /{session_endpoint}");
     socket // write request to the agent socket
-        .write_all(format!("connection\n{}", session_endpoint).as_bytes())
+        .write_all(format!("connection\n{session_endpoint}").as_bytes())
         .await
         .unwrap(); // handle unwrap...
 
@@ -122,13 +118,8 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let mut buffer = [0; 31250]; // 32 Kb
     loop {
         // Write data to socket on request
-        if let Some(request) = rx.recv().now_or_never() {
-            match request {
-                Some(request) => {
-                    socket.write(request.as_bytes()).await.unwrap();
-                }
-                None => {}
-            }
+        if let Some(Some(request)) = rx.recv().now_or_never() {
+            socket.write_all(request.as_bytes()).await.unwrap();
         }
 
         match socket.read(&mut buffer).now_or_never() {
