@@ -13,7 +13,8 @@ When a exposed service like a react app refers to a local resource (like an imag
 cargo install https://github.com/noreplydev/suiro --git 
 ```
 
-## Issues 
-If you find any issue, please report on github issues or email me at noreplycristiansanchez@gmail.com
+## features roadmap (the order could change)
+- [✔]️ Basic tunneling buffer
+- [_] Port suiro agent to rust (currently in nodejs)
 
 made with ❤️ by @noreplydev
