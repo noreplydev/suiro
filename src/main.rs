@@ -12,6 +12,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::time::interval;
 use unique_id::{string::StringGenerator, Generator};
 
 struct Port {
@@ -27,10 +28,10 @@ impl Port {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Session {
     socket_tx: mpsc::Sender<String>,
-    responses_rx: mpsc::Receiver<(String, String)>,
+    responses_rx: Arc<Mutex<mpsc::Receiver<(String, String)>>>,
 }
 
 impl Session {
@@ -40,7 +41,7 @@ impl Session {
     ) -> Self {
         Session {
             socket_tx,
-            responses_rx,
+            responses_rx: Arc::new(Mutex::new(responses_rx)),
         }
     }
 }
@@ -236,7 +237,7 @@ async fn http_connection_handler(
 ) -> Result<Response<Body>, hyper::Error> {
     let (session_endpoint, agent_request_path) = get_request_url(&_req);
     let uri = _req.uri().clone();
-    let request_path = uri.path().clone();
+    let request_path = uri.path();
     println!("[HTTP] {}", request_path);
 
     // avoid websocket
@@ -259,8 +260,11 @@ async fn http_connection_handler(
         return Ok(response);
     }
 
-    let mut sessions = sessions.lock().await; // get access to hashmap - very dangerous
-    if !sessions.contains_key(session_endpoint.as_str()) {
+    if !sessions
+        .lock()
+        .await
+        .contains_key(session_endpoint.as_str())
+    {
         let response = Response::builder()
             .status(404)
             .header("Content-type", "text/html")
@@ -268,7 +272,6 @@ async fn http_connection_handler(
             .unwrap();
         return Ok(response);
     }
-    let session = sessions.get_mut(session_endpoint.as_str());
 
     // Create raw http from request
     // ----------------------------
@@ -298,16 +301,20 @@ async fn http_connection_handler(
         }
     }
 
-    let session = match session {
-        Some(session) => session,
-        None => {
-            println!("es aqui");
-            let response = Response::builder()
-                .status(500)
-                .header("Content-type", "text/html")
-                .body(Body::from("<h1>500 Internal server error</h1>"))
-                .unwrap();
-            return Ok(response);
+    let session = {
+        let sessions = sessions.lock().await;
+        let session = sessions.get(session_endpoint.as_str());
+        match session {
+            Some(session) => session.clone(),
+            None => {
+                println!("es aqui");
+                let response = Response::builder()
+                    .status(500)
+                    .header("Content-type", "text/html")
+                    .body(Body::from("<h1>500 Internal server error</h1>"))
+                    .unwrap();
+                return Ok(response);
+            }
         }
     };
 
@@ -330,9 +337,10 @@ async fn http_connection_handler(
     let max_time = 100_000; // 100 seconds
     let mut time = 0;
     let mut http_raw_response = String::from("");
+    let mut timeout_interval = interval(Duration::from_millis(100));
     loop {
         // Check if response is ready
-        if let Some(agent_response) = session.responses_rx.recv().now_or_never() {
+        if let Some(agent_response) = session.responses_rx.lock().await.recv().now_or_never() {
             let agent_response = agent_response.unwrap();
             if request_id == agent_response.0 {
                 http_raw_response = agent_response.1;
@@ -345,7 +353,7 @@ async fn http_connection_handler(
             break;
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        timeout_interval.tick().await;
         time += 100;
     }
 
