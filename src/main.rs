@@ -1,6 +1,5 @@
 use base64::engine::general_purpose;
 use base64::Engine;
-use futures::lock::Mutex;
 use futures::FutureExt;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Response, Server};
@@ -11,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::interval;
 use unique_id::{string::StringGenerator, Generator};
 
@@ -28,10 +27,10 @@ impl Port {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Session {
     socket_tx: mpsc::Sender<String>,
-    responses_rx: Arc<Mutex<mpsc::Receiver<(String, String)>>>,
+    responses_rx: mpsc::Receiver<(String, String)>,
 }
 
 impl Session {
@@ -41,12 +40,12 @@ impl Session {
     ) -> Self {
         Session {
             socket_tx,
-            responses_rx: Arc::new(Mutex::new(responses_rx)),
+            responses_rx,
         }
     }
 }
 
-type Sessions = Arc<Mutex<HashMap<String, Session>>>;
+type Sessions = Arc<Mutex<HashMap<String, Arc<Mutex<Session>>>>>;
 
 #[tokio::main]
 async fn main() {
@@ -60,7 +59,7 @@ async fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
-    let mutex: Mutex<HashMap<String, Session>> = Mutex::new(HashMap::new());
+    let mutex: Mutex<HashMap<String, Arc<Mutex<Session>>>> = Mutex::new(HashMap::new());
     let sessions = Arc::new(mutex);
 
     let tcp = async {
@@ -107,7 +106,10 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let (tx, responses_rx) = mpsc::channel(100); // 100 message queue
     let session = Session::new(socket_tx, responses_rx);
     {
-        sessions.lock().await.insert(hashmap_key, session); // create a block to avoid infinite lock
+        sessions
+            .lock()
+            .await
+            .insert(hashmap_key, Arc::new(Mutex::new(session))); // create a block to avoid infinite lock
     }
 
     // Handle incoming data
@@ -318,6 +320,8 @@ async fn http_connection_handler(
         }
     };
 
+    let mut session = session.lock().await;
+
     // Send raw http to tcp socket
     let sent = session.socket_tx.send(request).await;
     match sent {
@@ -340,7 +344,7 @@ async fn http_connection_handler(
     let mut timeout_interval = interval(Duration::from_millis(100));
     loop {
         // Check if response is ready
-        if let Some(agent_response) = session.responses_rx.lock().await.recv().now_or_never() {
+        if let Some(agent_response) = session.responses_rx.recv().now_or_never() {
             let agent_response = agent_response.unwrap();
             if request_id == agent_response.0 {
                 http_raw_response = agent_response.1;
