@@ -1,5 +1,5 @@
 # suiro
-![suiro-logo](https://github.com/noreplydev/suiro-rs/blob/assets/Screenshot%202023-10-18%20at%2021.29.19.png?raw=true)
+![suiro-logo](https://raw.githubusercontent.com/noreplydev/suiro/assets/suiro_logo.png)
 Suiro is a NAT traversal for HTTP protocol based services. It allows you to expose your local services to the internet without having to configure your router or firewall. 
 
 ## limitations
