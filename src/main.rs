@@ -1,42 +1,11 @@
 mod core;
+mod entities;
+use crate::entities::{Port, Session};
 use core::http::http_server;
 use core::tcp::tcp_server;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
-
-struct Port {
-    num: u16,
-}
-
-impl Port {
-    fn new(port: u16) -> Self {
-        if port < 1024 {
-            println!("Port number must be greater than 1024 or run as root");
-        }
-        Port { num: port }
-    }
-}
-
-#[derive(Debug)]
-struct Session {
-    socket_tx: mpsc::Sender<String>,
-    responses_rx: mpsc::Receiver<(String, String)>,
-}
-
-impl Session {
-    fn new(
-        socket_tx: mpsc::Sender<String>,
-        responses_rx: mpsc::Receiver<(String, String)>,
-    ) -> Self {
-        Session {
-            socket_tx,
-            responses_rx,
-        }
-    }
-}
-
-type Sessions = Arc<Mutex<HashMap<String, Arc<Mutex<Session>>>>>;
 
 #[tokio::main]
 async fn main() {

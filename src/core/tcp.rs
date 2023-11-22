@@ -5,7 +5,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use unique_id::{string::StringGenerator, Generator};
 
-use crate::{Port, Session, Sessions};
+use crate::entities::{Port, Session, Sessions};
 
 pub async fn tcp_server(port: Port, sessions: Sessions) {
     let listener = TcpListener::bind(("0.0.0.0", port.num)).await.unwrap();

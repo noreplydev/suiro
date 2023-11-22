@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use unique_id::{string::StringGenerator, Generator};
 
-use crate::{Port, Sessions};
+use crate::entities::{Port, Sessions};
 
 pub async fn http_server(port: Port, sessions: Sessions) {
     // The address we'll bind to.
@@ -91,8 +91,8 @@ async fn http_connection_handler(
 
     for (key, value) in _req.headers() {
         match value.to_str() {
-            Ok(value) => request += &format!("{}: {}\n", capitilize(key.as_str()), value),
-            Err(_) => request += &format!("{}: {:?}\n", capitilize(key.as_str()), value.as_bytes()),
+            Ok(value) => request += &format!("{}: {}\n", key.as_str(), value),
+            Err(_) => request += &format!("{}: {:?}\n", key.as_str(), value.as_bytes()),
         }
     }
 
@@ -299,24 +299,4 @@ fn get_request_url(_req: &hyper::Request<Body>) -> (String, String) {
     // [same session-endpoint]
     url.drain(0..1);
     return (referer[0].clone(), "/".to_string() + &url.join("/"));
-}
-
-fn capitilize(string: &str) -> String {
-    let segments = string.split("-");
-    let mut result: Vec<String> = Vec::new();
-
-    for segment in segments {
-        let mut chars = segment.chars();
-        let mut capitalized = String::new();
-        if let Some(first_char) = chars.next() {
-            capitalized.push(first_char.to_ascii_uppercase());
-        }
-        for c in chars {
-            capitalized.push(c);
-        }
-
-        result.push(capitalized);
-    }
-
-    result.join("-")
 }
