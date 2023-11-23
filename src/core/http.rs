@@ -7,10 +7,12 @@ use serde_json::{Result as SerdeResult, Value};
 use std::result::Result;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::Mutex;
 use tokio::time::interval;
 use unique_id::{string::StringGenerator, Generator};
 
-use crate::entities::{Port, Sessions};
+use crate::entities::{Port, Session, Sessions};
 
 pub async fn http_server(port: Port, sessions: Sessions) {
     // The address we'll bind to.
@@ -111,7 +113,6 @@ async fn http_connection_handler(
         match session {
             Some(session) => session.clone(),
             None => {
-                println!("es aqui");
                 let response = Response::builder()
                     .status(500)
                     .header("Content-type", "text/html")
@@ -122,22 +123,16 @@ async fn http_connection_handler(
         }
     };
 
-    let mut session = session.lock().await;
-
-    // Send raw http to tcp socket
-    let sent = session.socket_tx.send(request).await;
-    match sent {
-        Ok(_) => {}
-        Err(_) => {
-            println!("[HTTP] 500 Status on {}", session_endpoint);
-            let response = Response::builder()
-                .status(500)
-                .header("Content-type", "text/html")
-                .body(Body::from("<h1>500 Internal server error</h1>"))
-                .unwrap();
-            return Ok(response);
-        }
-    }
+    let sent = send_raw_http(&session, request).await;
+    if let Err(_) = sent {
+        println!("[HTTP] 500 Status on {}", session_endpoint);
+        let response = Response::builder()
+            .status(500)
+            .header("Content-type", "text/html")
+            .body(Body::from("<h1>500 Internal server error</h1>"))
+            .unwrap();
+        return Ok(response);
+    };
 
     // Wait for response
     let max_time = 100_000; // 100 seconds
@@ -146,7 +141,7 @@ async fn http_connection_handler(
     let mut timeout_interval = interval(Duration::from_millis(100));
     loop {
         // Check if response is ready
-        if let Some(agent_response) = session.responses_rx.recv().now_or_never() {
+        if let Some(agent_response) = session.lock().await.responses_rx.recv().now_or_never() {
             let agent_response = agent_response.unwrap();
             if request_id == agent_response.0 {
                 http_raw_response = agent_response.1;
@@ -299,4 +294,16 @@ fn get_request_url(_req: &hyper::Request<Body>) -> (String, String) {
     // [same session-endpoint]
     url.drain(0..1);
     return (referer[0].clone(), "/".to_string() + &url.join("/"));
+}
+
+async fn send_raw_http(
+    session: &Arc<Mutex<Session>>,
+    http_raw: String,
+) -> Result<(), SendError<String>> {
+    let session = session.lock().await;
+    let sent = session.socket_tx.send(http_raw).await; // Send raw http to tcp socket
+    return match sent {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e),
+    };
 }
