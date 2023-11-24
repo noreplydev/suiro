@@ -18,7 +18,7 @@ When a exposed service like a react app refers to a local resource (like an imag
 <h2 align="center">features roadmap (the order could change)</h2>
 
 - [x]️ Basic tunneling
-- [_]️ Tcp connection buffer
+- [_]️ Dinamic buffer size on tcp stream
 - [_] Encrypt data between agent and server
 - [_] Port suiro agent to rust (currently in nodejs)
 
