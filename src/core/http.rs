@@ -30,10 +30,10 @@ pub async fn http_server(port: Port, sessions: Sessions) {
     });
 
     let server = Server::bind(&addr).serve(make_service);
-    println!("[HTTP] Waiting connections on {}", port.num);
+    println!("‣ [HTTP] Waiting connections on {}", port.num);
 
     if let Err(e) = server.await {
-        eprintln!("[HTTP] server error: {}", e);
+        eprintln!("‣ [HTTP] server error: {}", e);
     }
 }
 
@@ -44,11 +44,11 @@ async fn http_connection_handler(
     let (session_endpoint, agent_request_path) = get_request_url(&_req);
     let uri = _req.uri().clone();
     let request_path = uri.path();
-    println!("[HTTP] {}", request_path);
+    println!("‣ [HTTP] {}", request_path);
 
     // avoid websocket
     if _req.headers().contains_key("upgrade") {
-        println!("[HTTP](ws) 403 Status on {}", request_path);
+        println!("‣ [HTTP](ws) 403 Status on {}", request_path);
         let response = Response::builder()
             .status(404)
             .header("Content-type", "text/html")
@@ -125,7 +125,7 @@ async fn http_connection_handler(
 
     let sent = send_raw_http(&session, request).await;
     if let Err(_) = sent {
-        println!("[HTTP] 500 Status on {}", session_endpoint);
+        println!("‣ [HTTP] 500 Status on {}", session_endpoint);
         let response = Response::builder()
             .status(500)
             .header("Content-type", "text/html")
@@ -169,7 +169,7 @@ async fn http_connection_handler(
 
     // Check integrity of response [Packet fragmentation error]
     if http_raw_response == "EPACKFRAG".to_string() {
-        println!("[HTTP] 500 Status on {}", session_endpoint);
+        println!("‣ [HTTP] 500 Status on {}", session_endpoint);
         let response = Response::builder()
             .status(500)
             .header("Content-type", "text/html")
@@ -194,7 +194,7 @@ async fn http_connection_handler(
     let body = http_response["body"].as_str();
 
     if status_code == 0 {
-        println!("[HTTP] 570 Status on {}", session_endpoint);
+        println!("‣ [HTTP] 570 Status on {}", session_endpoint);
         let response = Response::builder()
             .status(570)
             .header("Content-type", "text/html")
@@ -204,7 +204,7 @@ async fn http_connection_handler(
     }
 
     if headers.keys().len() < 1 {
-        println!("[HTTP] 570 Status on {}", session_endpoint);
+        println!("‣ [HTTP] 570 Status on {}", session_endpoint);
         let response = Response::builder()
             .status(570)
             .header("Content-type", "text/html")
@@ -256,7 +256,7 @@ async fn http_connection_handler(
         response = response_builder.body(Body::empty()).unwrap();
     }
 
-    println!("[HTTP] 200 Status on {}", request_path);
+    println!("‣ [HTTP] 200 Status on {}", request_path);
     return Ok(response);
 }
 
@@ -298,10 +298,14 @@ fn get_request_url(_req: &hyper::Request<Body>) -> (String, String) {
 
 async fn send_raw_http(
     session: &Arc<Mutex<Session>>,
-    http_raw: String,
+    http_raw_request: String,
 ) -> Result<(), SendError<String>> {
     let session = session.lock().await;
-    let sent = session.socket_tx.send(http_raw).await; // Send raw http to tcp socket
+    let request_delimiter = "\n\n\n";
+    let sent = session
+        .socket_tx
+        .send(format!("{http_raw_request}{request_delimiter}"))
+        .await; // Send raw http to tcp socket
     return match sent {
         Ok(_) => Ok(()),
         Err(e) => Err(e),
