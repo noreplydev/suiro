@@ -44,15 +44,15 @@ async fn http_connection_handler(
     let (session_endpoint, agent_request_path) = get_request_url(&_req);
     let uri = _req.uri().clone();
     let request_path = uri.path();
-    println!("‣ [HTTP] {}", request_path);
+    println!("‣ [HTTP] {:?} {request_path}", _req.method());
 
     // avoid websocket
     if _req.headers().contains_key("upgrade") {
         println!("‣ [HTTP](ws) 403 Status on {}", request_path);
         let response = Response::builder()
-            .status(404)
+            .status(403)
             .header("Content-type", "text/html")
-            .body(Body::from("<h1>404 Not found</h1>"))
+            .body(Body::from("<h1>403 Not found</h1>"))
             .unwrap();
         return Ok(response);
     }
@@ -140,13 +140,9 @@ async fn http_connection_handler(
     let mut http_raw_response = String::from("");
     let mut timeout_interval = interval(Duration::from_millis(100));
     loop {
-        // Check if response is ready
-        if let Some(agent_response) = session.lock().await.responses_rx.recv().now_or_never() {
-            let agent_response = agent_response.unwrap();
-            if request_id == agent_response.0 {
-                http_raw_response = agent_response.1;
-                break;
-            }
+        if let Some(response) = match_response(&session, request_id.clone()).await {
+            http_raw_response = response;
+            break;
         }
 
         // Check if timeout
@@ -301,7 +297,7 @@ async fn send_raw_http(
     http_raw_request: String,
 ) -> Result<(), SendError<String>> {
     let session = session.lock().await;
-    let request_delimiter = "\n\n\n";
+    let request_delimiter = "<<<EOF>>>";
     let sent = session
         .socket_tx
         .send(format!("{http_raw_request}{request_delimiter}"))
@@ -310,4 +306,33 @@ async fn send_raw_http(
         Ok(_) => Ok(()),
         Err(e) => Err(e),
     };
+}
+
+async fn match_response(session: &Arc<Mutex<Session>>, request_id: String) -> Option<String> {
+    let mut target_session = session.lock().await;
+
+    // Check incomming response
+    if let Some(agent_response) = target_session.responses_rx.recv().now_or_never() {
+        let agent_response = agent_response.unwrap();
+
+        // get response or save as unmatched
+        if request_id == agent_response.0 {
+            println!("----- response");
+            return Some(agent_response.1);
+        } else {
+            target_session
+                .unmatched_responses
+                .insert(agent_response.0, agent_response.1);
+
+            // get matched response or save as unmatched
+            if let Some(response) = target_session.unmatched_responses.get(&request_id) {
+                println!("----- response (unmatched)");
+                return Some(response.clone());
+            } else {
+                println!("no response");
+                return None;
+            }
+        }
+    }
+    return None;
 }

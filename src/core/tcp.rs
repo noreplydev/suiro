@@ -9,7 +9,7 @@ use crate::entities::{Port, Session, Sessions};
 
 pub async fn tcp_server(port: Port, sessions: Sessions) {
     let listener = TcpListener::bind(("0.0.0.0", port.num)).await.unwrap();
-    println!("[TCP] Waiting connections on {}", port.num);
+    println!("○ [TCP] Waiting connections on {}", port.num);
 
     loop {
         let Ok((socket, _addr)) = listener.accept().await else {
@@ -28,7 +28,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     let session_id = StringGenerator::default().next_id();
     let session_endpoint = StringGenerator::default().next_id();
 
-    println!("[TCP] New connection {session_id}: /{session_endpoint}");
+    println!("○ [TCP] New connection {session_id}: /{session_endpoint}");
     socket // write request to the agent socket
         .write_all(format!("connection\n{session_endpoint}").as_bytes())
         .await
@@ -56,14 +56,14 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
     loop {
         // Write data to socket on request
         if let Some(Some(request)) = rx.recv().now_or_never() {
-            socket.write_all(request.as_bytes()).await.unwrap();
+            let _ = socket.write_all(request.as_bytes()).await;
         }
 
         if let Some(sock) = socket.read(&mut buffer).now_or_never() {
             match sock {
                 Ok(0) => {
                     // connection closed
-                    println!("[TCP] Connection closed: {}", session_id);
+                    println!("○ [TCP] Connection closed: {}", session_id);
                     break;
                 }
                 Ok(n) => {
@@ -75,7 +75,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                     let cur_packet_data = match cur_packet_data {
                         Ok(cur_packet_data) => cur_packet_data,
                         Err(_) => {
-                            eprintln!("[TCP] EPACKGRAG: Not valid utf8");
+                            eprintln!("○ [TCP] EPACKGRAG: Not valid utf8");
                             // Add data to responses hashmap
                             let _ = tx.send((packet_request_id, "EPACKFRAG".to_string())).await;
 
@@ -94,8 +94,6 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                         packet_acc_size = packet_acc_size + cur_packet_data.as_bytes().len();
 
                         if packet_acc_size == packet_total_size {
-                            println!("[TCP] Data on: {session_id}");
-
                             // Add data to responses hashmap
                             let _ = tx
                                 .send((packet_request_id, packet_acc_data.to_string()))
@@ -120,8 +118,6 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
 
                     // First packet appear, is complete?
                     if packet_size == packet_data.as_bytes().len() {
-                        println!("[TCP] Data on: {session_id}");
-
                         // Add data to responses hashmap
                         let _ = tx
                             .send((request_id.to_string(), packet_data.to_string()))
@@ -136,7 +132,7 @@ async fn tcp_connection_handler(mut socket: TcpStream, sessions: Sessions) {
                 }
                 Err(_) => {
                     // error
-                    eprintln!("[TCP] Error on socket connection: {session_id}");
+                    eprintln!("○ [TCP] Error on socket connection: {session_id}");
                     break;
                 }
             }

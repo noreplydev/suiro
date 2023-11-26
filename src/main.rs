@@ -19,6 +19,7 @@ async fn main() {
     let http_port = Port::new(8080);
     let tcp_port = Port::new(3040);
 
+    // Create a hashmap to store sessions
     let mutex: Mutex<HashMap<String, Arc<Mutex<Session>>>> = Mutex::new(HashMap::new());
     let sessions = Arc::new(mutex);
 
