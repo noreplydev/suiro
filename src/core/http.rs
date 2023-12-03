@@ -6,10 +6,9 @@ use hyper::{Body, Response, Server};
 use serde_json::{Result as SerdeResult, Value};
 use std::result::Result;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::Mutex;
-use tokio::time::interval;
+use tokio::time::Instant;
 use unique_id::{string::StringGenerator, Generator};
 
 use crate::entities::{Port, Session, Sessions};
@@ -135,10 +134,9 @@ async fn http_connection_handler(
     };
 
     // Wait for response
-    let max_time = 100_000; // 100 seconds
-    let mut time = 0;
+    let max_time = 100; // 100 seconds
+    let time = Instant::now();
     let mut http_raw_response = String::from("");
-    let mut timeout_interval = interval(Duration::from_millis(100));
     loop {
         if let Some(response) = match_response(&session, request_id.clone()).await {
             http_raw_response = response;
@@ -146,15 +144,12 @@ async fn http_connection_handler(
         }
 
         // Check if timeout
-        if time >= max_time {
+        if time.elapsed().as_secs() >= max_time {
             break;
         }
-
-        timeout_interval.tick().await;
-        time += 100;
     }
 
-    if time >= max_time {
+    if time.elapsed().as_secs() >= max_time {
         let response = Response::builder()
             .status(524)
             .header("Content-type", "text/html")
